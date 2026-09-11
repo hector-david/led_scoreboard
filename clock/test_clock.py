@@ -523,126 +523,104 @@ def test_zelda_fonts_are_well_formed() -> None:
     lit = lambda rows: sum(1 for r in rows for c in r if c not in z.DARK)
     for ch, rows in z.BOLD_DIGITS.items():
         check(lit(rows) > 0, f"digit {ch!r} renders nothing -- wrong lit/dark alphabet?")
-    check(len(z.TRIFORCE) == z.CREST_H, "the Triforce is three rows")
-    check(all(len(r) == z.CREST_W for r in z.TRIFORCE), "the Triforce is five wide")
+    # The 3x5 font is shared from clockface, and the bottom line's 32px budget
+    # assumes every glyph in it is exactly SMALL_W wide.
+    for ch, rows in SMALL.items():
+        check(
+            all(len(r) == z.SMALL_W for r in rows),
+            f"SMALL[{ch!r}] is not {z.SMALL_W} wide -- the strip budget assumes it is",
+        )
 
 
-def test_zelda_date_never_collides_with_a_triforce() -> None:
-    """19px of date between two 5px crests leaves 1px either side. Prove it."""
+def test_zelda_bottom_line_shows_date_and_weekday_together() -> None:
+    """One line, both halves, every second -- no alternation any more."""
     import zelda_clockface as z
 
     settings = z.ZeldaSettings()
-    palette = settings.palette
+    when = datetime(2026, 9, 11, 23, 59)
+    for second in range(60):
+        left, right = z.bottom_text(when.replace(second=second), settings)
+        check(left == "09/11", f"second {second}: date should always show, got {left!r}")
+        check(right == "FRI", f"second {second}: weekday should always show, got {right!r}")
+
+
+def test_zelda_bottom_line_fits_every_day_of_the_year() -> None:
+    """It comes to 32px exactly at the widest, so measure rather than assume."""
+    import zelda_clockface as z
+
+    settings = z.ZeldaSettings()
+    widest = 0
     base = datetime(2026, 1, 1, 13, 37)
-    for day in range(0, 366, 11):
-        for second in (0, settings.swap_every):
-            when = base + timedelta(days=day, seconds=second)
-            pixels = z.render(when, settings).load()
-            crest, text = set(), set()
-            for x in range(z.WIDTH):
-                for y in range(z.STRIP_TOP, z.HEIGHT):
-                    if pixels[x, y] == palette.crest:
-                        crest.add(x)
-                    elif pixels[x, y] == palette.date:
-                        text.add(x)
-            check(bool(text), f"{when:%m/%d %S} drew no date text")
+    for day in range(366):
+        when = base + timedelta(days=day)
+        left, right = z.bottom_text(when, settings)
+        width = z.strip_width(left, right)
+        widest = max(widest, width)
+        check(width <= z.TEXT_SLOT, f"{left} {right} needs {width}px, panel is {z.TEXT_SLOT}")
+        pixels = z.render(when, settings).load()
+        lit = [x for x in range(z.WIDTH) for y in range(z.STRIP_TOP, z.HEIGHT)
+               if pixels[x, y] != (0, 0, 0)]
+        check(bool(lit), f"{when:%m/%d} drew no bottom line")
+        check(max(lit) < z.WIDTH, f"{when:%m/%d} ran past the right edge")
+    check(widest == z.TEXT_SLOT, f"the widest line should fill the panel, got {widest}px")
+
+
+def test_zelda_draws_no_emblems() -> None:
+    """The Triforces are gone; only the date should light the bottom rows."""
+    import zelda_clockface as z
+
+    check(not hasattr(z, "TRIFORCE"), "the Triforce sprite should be gone")
+    check(not hasattr(z, "CREST_W"), "the crest constants should be gone")
+    settings = z.ZeldaSettings()
+    pixels = z.render(datetime(2026, 9, 11, 23, 59, 47), settings).load()
+    for x in range(z.WIDTH):
+        for y in range(z.STRIP_TOP, z.HEIGHT):
+            colour = pixels[x, y]
             check(
-                not (crest & text),
-                f"{when:%m/%d} second {second}: date and Triforce share columns {sorted(crest & text)}",
+                colour in ((0, 0, 0), settings.palette.date),
+                f"unexpected colour {colour} at {x},{y} -- only the date belongs here",
             )
 
 
-def test_zelda_alternates_date_and_weekday() -> None:
-    """The mockup shows both at once; 32 columns cannot, so they take turns."""
+def test_zelda_rejects_a_bottom_line_too_wide_for_the_panel() -> None:
+    """Date plus weekday is 32px exactly, so anything wider must fail up front."""
     import zelda_clockface as z
 
-    settings = z.ZeldaSettings(swap_every=5)
-    when = datetime(2026, 9, 11, 23, 59)
-    seen = {z.bottom_text(when.replace(second=s), settings) for s in range(60)}
-    check("09/11" in seen, f"the date should appear, got {seen}")
-    check("FRI" in seen, f"the weekday should appear, got {seen}")
-    check(len(seen) == 2, f"exactly two texts should cycle, got {seen}")
-    # ...and each holds for exactly swap_every seconds, including across :59.
-    runs = [z.bottom_text(when.replace(second=s), settings) for s in range(60)]
-    check(runs[0] != runs[5], "the slot should have swapped by second 5")
-    check(runs[0] == runs[59 - 49], "the cycle should tile the minute")
-
-
-def test_zelda_rejects_text_too_wide_for_the_slot() -> None:
-    """The slot is 20px. A format that overflows must fail on the command line."""
-    import zelda_clockface as z
-
-    for fmt in ("%Y-%m-%d", "%A", "%m/%d/%Y"):
+    for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%b %d"):
         try:
             z.ZeldaSettings(date_format=fmt)
         except ValueError:
             continue
-        raise Failure(f"date_format {fmt!r} does not fit {z.TEXT_SLOT}px and should have raised")
-    for fmt in ("%m/%d", "%a", "%H:%M"):
-        z.ZeldaSettings(date_format=fmt)  # must not raise
-
-
-def test_zelda_swap_every_must_tile_a_minute() -> None:
-    import zelda_clockface as z
-
-    for bad in (7, 11, 4, 0, -1):
+        raise Failure(f"date_format {fmt!r} plus a weekday does not fit and should have raised")
+    try:
+        z.ZeldaSettings(weekday_format="%A")  # MONDAY .. WEDNESDAY
+    except ValueError:
+        pass
+    else:
+        raise Failure("weekday_format '%A' should not fit alongside the date")
+    for label, kwargs in (("empty date", {"date_format": ""}),
+                          ("empty weekday", {"weekday_format": "  "}),
+                          ("bad directive", {"date_format": "%Q"})):
         try:
-            z.ZeldaSettings(swap_every=bad)
+            z.ZeldaSettings(**kwargs)
         except ValueError:
             continue
-        raise Failure(f"swap_every={bad} should have raised")
-    for good in (1, 3, 5, 15):
-        z.ZeldaSettings(swap_every=good)
+        raise Failure(f"{label} should have raised")
+    z.ZeldaSettings(date_format="%m/%d", weekday_format="%a")  # the default must fit
 
 
-def test_zelda_preview_tiles_match_their_caption() -> None:
-    """The caption is printed to the user, so tile 1 must really be the date.
-
-    The seconds were literals once, which inverted the pair for every
-    `swap_every` but the default -- and the caption reads the opposite way round.
-    """
-    import zelda_clockface as z
-
-    for swap in (1, 3, 5, 15):
-        settings = z.ZeldaSettings(swap_every=swap)
-        moments = z.preview_moments(settings)
-        first = z.bottom_text(moments[0], settings)
-        second = z.bottom_text(moments[1], settings)
-        check(first[0].isdigit(), f"swap_every={swap}: tile 1 should be the date, got {first!r}")
-        check(second.isalpha(), f"swap_every={swap}: tile 2 should be the weekday, got {second!r}")
-        check("date" in z.preview_caption(settings), "the caption should still name the date")
-
-
-def test_zelda_no_crests_frees_the_columns() -> None:
-    """Dropping the Triforces should widen the text budget, not just hide them."""
-    import zelda_clockface as z
-
-    check(z.ZeldaSettings(crests=True).text_slot == z.TEXT_SLOT, "crests narrow the slot")
-    check(z.ZeldaSettings(crests=False).text_slot == z.WIDTH, "no crests means the whole panel")
-    # 8 characters is 31px: too wide between the Triforces, fine without them.
-    z.ZeldaSettings(crests=False, date_format="%m/%d/%y")
-    try:
-        z.ZeldaSettings(crests=True, date_format="%m/%d/%y")
-    except ValueError as exc:
-        check("Triforces" in str(exc), f"the message should name what is in the way: {exc}")
-        return
-    raise Failure("with crests on, an 8-character date should not fit")
-
-
-def test_zelda_strip_refuses_rather_than_overdrawing() -> None:
-    """Defence in depth: a format past the probe set must raise, not eat a crest."""
+def test_zelda_strip_refuses_rather_than_running_off_the_edge() -> None:
+    """Defence in depth: a format past the probe set must raise, not overflow."""
     import zelda_clockface as z
 
     settings = z.ZeldaSettings()
-    # Reach past __post_init__ by mutating the frozen instance the hard way, the
-    # way a future probe-set gap would.
     object.__setattr__(settings, "date_format", "%m/%d/%Y")
     try:
         z.render(datetime(2026, 9, 11, 12, 0, 0), settings)
     except ValueError as exc:
         check("px" in str(exc), f"the message should give the width: {exc}")
         return
-    raise Failure("an over-wide date must raise from the renderer, not overdraw a Triforce")
+    raise Failure("an over-wide bottom line must raise from the renderer")
 
 
 def test_zelda_glow_is_the_shared_implementation() -> None:

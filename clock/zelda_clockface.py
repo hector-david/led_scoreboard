@@ -1,4 +1,4 @@
-r"""The Zelda face: bold cyan 24-hour digits, a seconds bar, and two Triforces.
+r"""The Zelda face: bold cyan 24-hour digits, a seconds bar, and a date line.
 
 Drawn from the mockups in `zelda/1.png` .. `zelda/5.png` (the five are one design
 at five different seconds-bar fills). Same contract as `clockface.py` -- give it a
@@ -9,17 +9,13 @@ without knowing anything about what it draws.
     |  ##  ##  :  ##  ##             |  rows 0-8   HH:MM, 6x9 bold digits, cyan
     |                                |  row  9     gap
     |#########-----------------------|  row  10    seconds bar, cyan on grey
-    | /\  09/10                 /\   |  rows 11-15 Triforce, date, Triforce
+    |09/11 FRI                       |  rows 11-15 date and weekday, yellow
     +--------------------------------+
 
 What had to change, and why
     The mockup is a 38x20 grid. This panel is 32x16, so it does not map 1:1 and
-    something had to give. Three things did:
+    something had to give:
 
-    * The date line reads "09/10 TUE" in the mockup -- nine 3px characters plus
-      gaps is 35px, which does not fit 32 even with the Triforces removed. So the
-      middle slot alternates between the date and the weekday instead of showing
-      both at once. Nothing is lost, it just takes turns.
     * The mockup's digits are 11 rows of a 20-row panel (55%). These are 9 rows
       of 16 (56%), so the proportion carries over even though the pixel count
       does not. They are also 6 columns wide rather than the mockup's 7 --
@@ -28,14 +24,17 @@ What had to change, and why
     * The mockup has a blank row on both sides of the seconds bar. There is only
       budget for one, so it sits above the bar, between the bar and the digits --
       the busier boundary of the two.
+    * The mockup flanks the date with a winged Hyrule crest at each end. Those
+      are gone, which is what buys the room for the date and the weekday to
+      share one line: "09/11 FRI" is exactly 32px, and the two crests were 12px
+      of the 32 between them.
 
-    The Triforce is drawn rather than the winged Hyrule crest from the mockup.
-    At five pixels across, the crest's wings collapse into a blob; the Triforce
-    survives the resolution and is the more legible emblem for it.
+    That last one is a tight fit with no slack at all, so a `--date-format` or
+    `--weekday-format` that renders any wider is refused on the command line
+    rather than clipped on the panel.
 
 Colours are sampled from the mockups rather than guessed: the cyan is
-(5, 250, 254), the yellow (254, 252, 11), the pink (251, 68, 149) and the unlit
-bar track (55, 55, 63).
+(5, 250, 254), the yellow (254, 252, 11) and the unlit bar track (55, 55, 63).
 """
 
 from __future__ import annotations
@@ -76,11 +75,13 @@ BAR_ROW = DIGIT_H + 1  # 10
 STRIP_TOP = DIGIT_H + 2  # 11
 STRIP_H = HEIGHT - STRIP_TOP  # 5
 
-CREST_W = 5
-CREST_H = 3
-# Widest the middle text may be: the panel less both Triforces and a gap either
-# side of them. 20px is five 3x5 characters, which is exactly "09/10".
-TEXT_SLOT = WIDTH - 2 * CREST_W - 2 * GAP
+# The bottom line carries the date and the weekday together, so it gets the
+# whole panel. "09/11 FRI" comes to exactly 32px: five 3x5 glyphs and four gaps
+# for the date, two gaps for the separator, three glyphs and two gaps for the
+# weekday. There is no slack, which is why a wider format is refused up front
+# rather than clipped.
+TEXT_SLOT = WIDTH
+RUN_GAP = 2  # pixels between the date and the weekday
 
 # Bold 6x9 digits traced from the mockup's own glyphs: 2px strokes, corner pixels
 # cut from the top and bottom bars, and a diagonal '2' with the upper-left stub
@@ -111,10 +112,6 @@ BOLD_DIGITS: Dict[str, Sequence[str]] = {
           "....##", "....##", "######", ".####."),
 }
 
-# Apex, the notch that makes it three triangles rather than one, then the base.
-TRIFORCE: Sequence[str] = ("00100", "01010", "11111")
-
-
 @dataclass(frozen=True)
 class ZeldaPalette:
     """Sampled from zelda/1.png, not invented."""
@@ -124,7 +121,6 @@ class ZeldaPalette:
     bar: RGB = (5, 250, 254)
     bar_track: RGB = (55, 55, 63)
     date: RGB = (254, 252, 11)
-    crest: RGB = (251, 68, 149)
     background: RGB = (0, 0, 0)
 
 
@@ -140,27 +136,15 @@ class ZeldaSettings:
     seconds_bar: bool = True
     blink_colon: bool = False
     leading_zero: bool = True
-    crests: bool = True
     date_format: str = "%m/%d"
     weekday_format: str = "%a"
-    swap_every: int = 5  # seconds the date holds before the weekday takes over
     glow: float = 0.0
     palette: ZeldaPalette = field(default_factory=ZeldaPalette)
 
     def __post_init__(self) -> None:
         if not 0.0 <= self.glow <= 1.0:
             raise ValueError(f"glow must be 0.0-1.0, got {self.glow}")
-        if self.swap_every <= 0:
-            raise ValueError(f"swap_every must be positive, got {self.swap_every}")
-        if 60 % (2 * self.swap_every):
-            # The slot alternates on `second // swap_every`, so a period that
-            # does not tile a minute makes one of the two stick at :59 -> :00.
-            raise ValueError(
-                f"swap_every must divide 30 so the pair tiles a minute, got {self.swap_every}"
-            )
-        for label, fmt in (("date_format", self.date_format),
-                           ("weekday_format", self.weekday_format)):
-            self._check_fits(label, fmt)
+        self._check_strip()
 
     @property
     def show_date(self) -> bool:
@@ -168,47 +152,56 @@ class ZeldaSettings:
         firmware clock handed back on exit should show one too."""
         return True
 
-    @property
-    def text_slot(self) -> int:
-        """Width the middle text may use. Dropping the Triforces frees the ten
-        columns they occupied, so `--no-crests` gets the whole panel."""
-        return TEXT_SLOT if self.crests else WIDTH
+    def _check_strip(self) -> None:
+        """Refuse a bottom line that cannot fit 32 columns, at build time.
 
-    def _check_fits(self, label: str, fmt: str) -> None:
-        """Refuse a format that cannot fit the middle slot, at build time.
+        Both halves share one row now, so they have to be measured together --
+        each is comfortable alone and the pair is what runs out of room. The
+        default pair renders "09/11 FRI" at 31px of the 32 available, so there
+        is one pixel of slack and no more.
 
-        The text swaps in a few seconds after the run starts, so without this
-        the failure would land on the panel rather than on the command line.
-        The probe set has to cover every axis strftime can vary along: all
-        twelve months, both day widths, every weekday, and -- because `%H`,
-        `%p` and Windows' `%#I` all change width with the clock -- four times of
-        day, including both sides of noon.
+        The probe set covers every axis strftime can vary along: all twelve
+        months, both day widths, every weekday, and -- because `%H`, `%p` and
+        Windows' `%#I` change width with the clock -- four times of day,
+        including both sides of noon.
         """
-        if not fmt.strip():
-            raise ValueError(f"{label} is empty, which would blank the bottom line")
+        for label, fmt in (("date_format", self.date_format),
+                           ("weekday_format", self.weekday_format)):
+            if not fmt.strip():
+                raise ValueError(f"{label} is empty, which would blank half the bottom line")
+
         times = ((0, 0, 0), (12, 0, 0), (13, 5, 5), (23, 59, 59))
         probes = [datetime(2024, m, d, *t)
                   for m in range(1, 13) for d in (1, 28) for t in times]
         probes += [datetime(2024, 1, d, 23, 59, 59) for d in range(1, 8)]  # Mon..Sun
-        slot = self.text_slot
+
         for probe in probes:
-            try:
-                text = probe.strftime(fmt).upper()
-            except ValueError as exc:
-                raise ValueError(f"{label} {fmt!r} is not a valid strftime format: {exc}") from None
-            missing = sorted({c for c in text if c not in SMALL})
-            if missing:
+            left, right = self._runs(probe)
+            for label, text in (("date_format", left), ("weekday_format", right)):
+                missing = sorted({c for c in text if c not in SMALL})
+                if missing:
+                    raise ValueError(
+                        f"{label} renders {text!r}, which has no 3x5 glyph for "
+                        f"{''.join(missing)!r}"
+                    )
+            width = strip_width(left, right)
+            if width > TEXT_SLOT:
                 raise ValueError(
-                    f"{label} {fmt!r} renders {text!r}, which has no 3x5 glyph for "
-                    f"{''.join(missing)!r}"
+                    f"{self.date_format!r} + {self.weekday_format!r} renders "
+                    f"{left + ' ' + right!r} at {width}px, but the panel is "
+                    f"{TEXT_SLOT}px. Shorten one of them."
                 )
-            width = text_width(text)
-            if width > slot:
-                where = "the slot between the Triforces" if self.crests else "the panel"
-                raise ValueError(
-                    f"{label} {fmt!r} renders {text!r} at {width}px, but {where} is "
-                    f"{slot}px ({(slot + GAP) // (SMALL_W + GAP)} characters)"
-                )
+
+    def _runs(self, when: datetime) -> Tuple[str, str]:
+        """The two halves of the bottom line, already upper-cased."""
+        try:
+            return (when.strftime(self.date_format).upper(),
+                    when.strftime(self.weekday_format).upper())
+        except ValueError as exc:
+            raise ValueError(
+                f"{self.date_format!r} / {self.weekday_format!r} is not a valid "
+                f"strftime format: {exc}"
+            ) from None
 
 
 def _check_layout() -> None:
@@ -262,8 +255,17 @@ def clock_text(when: datetime, settings: ZeldaSettings) -> str:
 
 
 def text_width(text: str) -> int:
-    """Pixels a 3x5 string occupies in the bottom strip, gaps included."""
-    return len(text) * SMALL_W + max(0, len(text) - 1) * GAP if text else 0
+    """Pixels a 3x5 string occupies, inter-character gaps included."""
+    if not text:
+        return 0
+    return len(text) * SMALL_W + (len(text) - 1) * GAP
+
+
+def strip_width(left: str, right: str) -> int:
+    """The whole bottom line: date, separator, weekday."""
+    if not right:
+        return text_width(left)
+    return text_width(left) + RUN_GAP + text_width(right)
 
 
 def time_layout_width(text: str) -> int:
@@ -271,15 +273,9 @@ def time_layout_width(text: str) -> int:
     return len(digits) * DIGIT_W + COLON_W + len(digits) * GAP
 
 
-def bottom_text(when: datetime, settings: ZeldaSettings) -> str:
-    """Date or weekday, whichever this half of the cycle belongs to.
-
-    The mockup shows both side by side. At 32 columns that is 35px of text, so
-    they take turns instead.
-    """
-    slot = (when.second // settings.swap_every) % 2
-    fmt = settings.date_format if slot == 0 else settings.weekday_format
-    return when.strftime(fmt).upper()
+def bottom_text(when: datetime, settings: ZeldaSettings) -> Tuple[str, str]:
+    """The date and the weekday, both shown, side by side as in the mockup."""
+    return settings._runs(when)
 
 
 def render(when: datetime, settings: Optional[ZeldaSettings] = None) -> Image.Image:
@@ -332,25 +328,24 @@ def _draw_seconds_bar(frame: Frame, when: datetime, settings: ZeldaSettings) -> 
 
 
 def _draw_strip(frame: Frame, when: datetime, settings: ZeldaSettings) -> None:
+    """The bottom line: date and weekday together, centred as one unit."""
     palette = settings.palette
-    if settings.crests:
-        crest_y = STRIP_TOP + (STRIP_H - CREST_H) // 2
-        draw_glyph(frame, TRIFORCE, 0, crest_y, palette.crest)
-        draw_glyph(frame, TRIFORCE, WIDTH - CREST_W, crest_y, palette.crest)
-
-    text = bottom_text(when, settings)
-    width = text_width(text)
-    if width > settings.text_slot:
-        # Defence in depth behind `_check_fits`. If a format ever slips through
-        # the probe set, refusing is right and overdrawing a Triforce is not --
+    left, right = bottom_text(when, settings)
+    width = strip_width(left, right)
+    if width > TEXT_SLOT:
+        # Defence in depth behind `_check_strip`. If a format ever slips past
+        # the probe set, refusing is right and running off the edge is not --
         # and the driver turns a ValueError into a clean exit.
         raise ValueError(
-            f"{text!r} needs {width}px but the middle slot is {settings.text_slot}px"
+            f"{left + ' ' + right!r} needs {width}px but the panel is {TEXT_SLOT}px"
         )
+
     x = (WIDTH - width) // 2
-    for ch in text:
-        draw_glyph(frame, SMALL[ch], x, STRIP_TOP, palette.date)
-        x += SMALL_W + GAP
+    for run in (left, right):
+        for ch in run:
+            draw_glyph(frame, SMALL[ch], x, STRIP_TOP, palette.date)
+            x += SMALL_W + GAP
+        x += RUN_GAP - GAP  # the run's trailing gap is already counted
 
 
 def to_image(frame: Frame) -> Image.Image:
@@ -381,7 +376,6 @@ def build_settings(args: argparse.Namespace) -> ZeldaSettings:
         colon=args.colon_color or time,
         bar=args.bar_color or time,
         date=args.date_color or stock.date,
-        crest=args.crest_color or stock.crest,
     )
     return ZeldaSettings(
         h24=args.h24 if args.h24 is not None else True,
@@ -389,63 +383,48 @@ def build_settings(args: argparse.Namespace) -> ZeldaSettings:
         # Steady by default: the mockup's colon does not blink.
         blink_colon=args.blink_colon if args.blink_colon is not None else False,
         leading_zero=args.leading_zero if args.leading_zero is not None else True,
-        crests=not args.no_crests,
         date_format=args.date_format,
         weekday_format=args.weekday_format,
-        swap_every=args.swap_every,
         glow=args.glow,
         palette=palette,
     )
 
 
 def tick_seconds(settings: ZeldaSettings) -> float:
-    """The bar and the date swap both move on the second, so: every second."""
+    """Only the bar and the colon move within a minute now that the bottom line
+    is static, so without either there is nothing to redraw until the minute."""
     if settings.seconds_bar or settings.blink_colon:
         return 1.0
-    return float(settings.swap_every)
+    return 60.0
 
 
 def preview_caption(settings: ZeldaSettings) -> str:
     """Names the tiles preview_moments returns, in the same order."""
     return (
-        "the mockup's 23:59 with the date, the same minute with the weekday, "
-        "midnight, single-digit hour, a full bar, round digits"
+        "the mockup's 23:59, a two-digit month, midnight, single-digit hour, "
+        "a full bar, round digits"
     )
 
 
 def validation_moments(settings: ZeldaSettings, now: datetime) -> List[datetime]:
-    """Both halves of the swap cycle, so a bad format cannot wait for the panel.
-
-    The weekday only occupies half the cycle; rendering `now` alone would let a
-    `--weekday-format` that does not fit raise seconds into a live run.
-    """
-    return [now.replace(second=0), now.replace(second=settings.swap_every)]
+    """Nothing extra to probe: the bottom line is the same on every frame, and
+    `_check_strip` already swept a year of them at build time."""
+    return []
 
 
 def preview_moments(settings: ZeldaSettings) -> List[datetime]:
     """Times chosen to catch what actually breaks this layout."""
     day = datetime.now().date()
     midnight = datetime.combine(day, datetime.min.time())
-    # Derived, not hard-coded: which second lands in which half of the swap
-    # cycle depends on `swap_every`, so literals here would silently invert the
-    # caption's tile order for any value but the default.
     cases = [
-        (23, 59, _latest_second_in_slot(settings, 0)),  # the mockup's time, date showing
-        (23, 59, _latest_second_in_slot(settings, 1)),  # same minute, weekday showing
+        (23, 59, 47),  # the mockup's own time
+        (12, 25, 52),  # a two-digit month and day: the widest bottom line
         (0, 0, 2),  # midnight, bar nearly empty
         (9, 5, 30),  # single-digit hour
         (12, 34, 59),  # bar full
         (8, 8, 12),  # round digits
     ]
     return [midnight.replace(hour=h, minute=m, second=s) for h, m, s in cases]
-
-
-def _latest_second_in_slot(settings: ZeldaSettings, slot: int) -> int:
-    """The last second of the minute that shows `slot`, so the bar reads full-ish."""
-    for second in range(59, -1, -1):
-        if (second // settings.swap_every) % 2 == slot:
-            return second
-    raise AssertionError(f"no second falls in slot {slot} at swap_every={settings.swap_every}")
 
 
 def preview_sheet(

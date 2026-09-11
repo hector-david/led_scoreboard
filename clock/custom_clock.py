@@ -392,11 +392,9 @@ def build_parser() -> argparse.ArgumentParser:
     design.add_argument("--bar-color", type=parse_color, help="seconds bar colour [face default]")
     design.add_argument("--date-color", type=parse_color, help="date line colour [face default]")
     design.add_argument("--pm-color", type=parse_color, help="PM marker colour [default face]")
-    design.add_argument("--crest-color", type=parse_color, help="Triforce colour [zelda face]")
     design.add_argument("--no-bar", action="store_true", help="drop the seconds bar")
     design.add_argument("--bar-height", type=int, default=2, help="bar rows (default face)")
     design.add_argument("--no-pm-dot", action="store_true", help="drop the PM marker")
-    design.add_argument("--no-crests", action="store_true", help="drop the Triforces")
     design.add_argument("--glow", type=float, default=0.0, help="LED bleed, 0.0-1.0")
 
     fmt = design.add_mutually_exclusive_group()
@@ -417,9 +415,8 @@ def build_parser() -> argparse.ArgumentParser:
     design.add_argument("--date-format", default="%m/%d", help="strftime for the date line")
     design.add_argument("--date-every", type=int, default=20, help="date cycle (default face)")
     design.add_argument("--date-for", type=int, default=5, help="date dwell (default face)")
-    design.add_argument("--weekday-format", default="%a", help="strftime for the weekday (zelda)")
-    design.add_argument("--swap-every", type=int, default=5,
-                        help="seconds between date and weekday (zelda)")
+    design.add_argument("--weekday-format", default="%a",
+                        help="strftime for the weekday shown beside the date [zelda]")
 
     run = p.add_argument_group("running")
     run.add_argument("--preview", type=Path, help="write a contact sheet and exit")

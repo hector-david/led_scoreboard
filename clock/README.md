@@ -205,37 +205,39 @@ py custom_clock.py --face zelda --preview zelda.png   # look first
 py custom_clock.py --face zelda                       # push it live
 ```
 
-Bold cyan 24-hour digits, a cyan seconds bar, and a yellow date line flanked by
-two Triforces — drawn from the mockups in `zelda/1.png` … `zelda/5.png` (which
-are one design at five different bar fills). Colours are sampled from those
-files, not guessed: cyan `(5,250,254)`, yellow `(254,252,11)`, pink
-`(251,68,149)`, unlit track `(55,55,63)`.
+Bold cyan 24-hour digits, a cyan seconds bar, and a yellow line carrying the
+date and the weekday together — drawn from the mockups in `zelda/1.png` …
+`zelda/5.png` (which are one design at five different bar fills). Colours are
+sampled from those files, not guessed: cyan `(5,250,254)`, yellow
+`(254,252,11)`, unlit track `(55,55,63)`.
 
 ```
 +--------------------------------+
 |  ##  ##  :  ##  ##             |  rows 0-8   HH:MM, 6x9 bold digits
 |                                |  row  9     gap
 |#########-----------------------|  row  10    seconds bar
-| /\  09/10                 /\   |  rows 11-15 Triforce, date, Triforce
+|09/11 FRI                       |  rows 11-15 date and weekday
 +--------------------------------+
 ```
 
 **Three things had to change**, because the mockup is a 38×20 grid and this
 panel is 32×16:
 
-- The mockup's date line reads `09/10 TUE`. Nine 3×5 characters plus gaps is
-  35px — wider than the panel even with the crests removed. So the middle slot
-  **alternates** between the date and the weekday every 5 seconds (`--swap-every`)
-  instead of showing both at once.
+- The mockup flanks the date with a winged Hyrule crest at each end. Those are
+  gone — which is exactly what buys the room for the date and the weekday to
+  share one line. `09/11 FRI` is 32px on the nose, and the two crests were 12px
+  of the 32 between them.
 - The digits are 9 rows rather than 11 — but 9 of 16 is 56%, against the
   mockup's 11 of 20 at 55%, so the proportion survives even though the pixel
-  count doesn't.
+  count doesn't. They're 6 columns wide rather than 7, because four 7-wide
+  digits plus a colon is 34px. The shapes carry over: cut corners, 2px strokes,
+  the diagonal `2`.
 - The mockup has a blank row either side of the seconds bar. There's budget for
   one, so it sits above the bar, at the busier boundary.
 
-It draws the **Triforce** rather than the winged Hyrule crest from the mockup.
-At five pixels across the crest's wings collapse into a blob; the Triforce
-survives the resolution and is the more legible emblem for it.
+The bottom line has **no slack at all** — 32px of 32 — so a `--date-format` or
+`--weekday-format` that renders any wider is refused on the command line rather
+than clipped on the panel.
 
 Each face applies its own defaults, so `--face zelda` gets 24-hour time and the
 sampled cyan while the default face stays 12-hour. The flags divide into three
@@ -243,19 +245,16 @@ groups:
 
 | Works on both | Zelda only | Default face only |
 | --- | --- | --- |
-| `--color` `--colon-color` `--bar-color` `--date-color` | `--crest-color` | `--pm-color` |
-| `--no-bar` `--glow` `--12h`/`--24h` | `--no-crests` | `--no-pm-dot` `--bar-height` |
-| `--blink`/`--no-blink` `--leading-zero` `--date-format` | `--weekday-format` `--swap-every` | `--date` `--date-every` `--date-for` |
+| `--color` `--colon-color` `--bar-color` `--date-color` | `--weekday-format` | `--pm-color` `--bar-height` |
+| `--no-bar` `--glow` `--12h`/`--24h` | | `--no-pm-dot` `--date` |
+| `--blink`/`--no-blink` `--leading-zero` `--date-format` | | `--date-every` `--date-for` |
 
 Flags from the wrong column are accepted and ignored rather than rejected, so
 switching `--face` never means rewriting the command.
 
-A date format too wide for the 20px slot between the Triforces is refused on the
-command line rather than mid-run:
-
 ```
-error: weekday_format '%A' renders 'MONDAY' at 23px, but the slot between
-the Triforces is 20px (5 characters)
+error: '%m/%d' + '%A' renders '01/01 MONDAY' at 44px, but the panel is 32px.
+Shorten one of them.
 ```
 
 ### Adding your own face

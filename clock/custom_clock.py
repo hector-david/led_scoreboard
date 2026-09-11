@@ -1,7 +1,7 @@
 """Draw your own clock face on the panel, and hand the panel back when you stop.
 
     py custom_clock.py --preview sheet.png        # design it, no radio
-    py custom_clock.py                            # push the face, once a second
+    py custom_clock.py                            # push the face, live
     py custom_clock.py --color amber --no-bar --glow 0.25
     py custom_clock.py --duration 60              # run for a minute, then hand back
     py custom_clock.py --retry 10                 # wait 10s between reconnects
@@ -9,7 +9,9 @@
 
 Two faces ship: `default` (clockface.py) and `zelda` (zelda_clockface.py, traced
 from the mockups in zelda/). Pick one with --face; each applies its own colours
-and clock format, and the shared design flags override either.
+and clock format, and the shared design flags override either. Each also sets its
+own repaint rate -- the Zelda bar steps every 1.875s, so that face is redrawn on
+a 1.875s grid rather than once a second.
 
 It survives the panel going away. Unplug it, walk out of range, or let the phone
 app steal the link, and this drops into a reconnect loop -- every 5 seconds,
@@ -37,6 +39,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import io
+import math
 import signal
 import sys
 import time
@@ -204,7 +207,12 @@ async def _stream(
     """
     frames = 0
     failures = 0
-    deadline = time.time()
+    # Align the repaint grid to the wall clock rather than to whenever the
+    # connection happened to open. The Zelda bar steps every 60/32 seconds, and
+    # 60 is a whole number of those steps, so multiples of the interval since
+    # the epoch land on both the step boundaries and the minute -- meaning a
+    # pixel appears when it is due instead of up to a full interval late.
+    deadline = math.floor(time.time() / interval) * interval + interval
     checked_size = False
 
     while not interrupt.event.is_set():

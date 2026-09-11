@@ -205,17 +205,20 @@ py custom_clock.py --face zelda --preview zelda.png   # look first
 py custom_clock.py --face zelda                       # push it live
 ```
 
-Bold cyan 24-hour digits, a cyan seconds bar, and a yellow line carrying the
+Bold cyan 24-hour digits, a green seconds bar, and a yellow line carrying the
 date and the weekday together — drawn from the mockups in `zelda/1.png` …
 `zelda/5.png` (which are one design at five different bar fills). Colours are
 sampled from those files, not guessed: cyan `(5,250,254)`, yellow
-`(254,252,11)`, unlit track `(55,55,63)`.
+`(254,252,11)`, unlit track `(55,55,63)`. The bar is the exception — green
+`(0,255,0)` by choice where the mockup has cyan, sharing no channel with the
+cyan above it or the yellow below. It keeps that colour when you pass `--color`;
+use `--bar-color` to change it.
 
 ```
 +--------------------------------+
 |  ##  ##  :  ##  ##             |  rows 0-8   HH:MM, 6x9 bold digits
 |                                |  row  9     gap
-|#########-----------------------|  row  10    seconds bar
+|#########-----------------------|  row  10    seconds bar (green)
 |09/11 FRI                       |  rows 11-15 date and weekday
 +--------------------------------+
 ```
@@ -238,6 +241,20 @@ panel is 32×16:
 The bottom line has **no slack at all** — 32px of 32 — so a `--date-format` or
 `--weekday-format` that renders any wider is refused on the command line rather
 than clipped on the panel.
+
+**The seconds bar steps every 1.875 seconds.** 60 ÷ 32 pixels is 1.875 exactly,
+and a pixel lights when its step *finishes*: the bar is empty for the first
+1.875s of each minute, shows one pixel at 1.875s, two at 3.75s, and so on.
+
+One consequence worth knowing — the 32nd step would complete at exactly 60s,
+which is the same instant the bar resets, so **it tops out at 31 of 32 lit** and
+never shows completely full. That falls out of the arithmetic: you can wait a
+step before the first pixel, or see a full bar, but not both.
+
+The face asks the driver to repaint on that same 1.875s grid rather than once a
+second, and the driver aligns its schedule to the wall clock — so each pixel
+appears when it is due instead of up to a second late. With `--blink` it falls
+back to 1 Hz, since a blinking colon needs it.
 
 Each face applies its own defaults, so `--face zelda` gets 24-hour time and the
 sampled cyan while the default face stays 12-hour. The flags divide into three

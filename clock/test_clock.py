@@ -673,17 +673,126 @@ def test_zelda_every_minute_fits_the_panel() -> None:
                 check(width <= z.WIDTH, f"{text!r} needs {width}px, panel is {z.WIDTH}")
 
 
-def test_zelda_seconds_bar_fills_over_a_minute() -> None:
+def _bar_pixels(when: datetime, settings) -> int:
+    import zelda_clockface as z
+
+    pixels = z.render(when, settings).load()
+    return sum(1 for x in range(z.WIDTH) if pixels[x, z.BAR_ROW] == settings.palette.bar)
+
+
+def test_zelda_bar_has_its_own_colour_independent_of_the_digits() -> None:
+    """The bar used to inherit --color. It has its own identity now."""
+    import custom_clock
+    import zelda_clockface as z
+
+    stock = z.ZeldaPalette()
+    check(stock.bar == (0, 255, 0), f"the bar should be green, got {stock.bar}")
+    check(stock.bar != stock.time, "the bar must not match the digits")
+    check(stock.bar != stock.date, "nor the date line below it")
+
+    parser = custom_clock.build_parser()
+    plain = z.build_settings(parser.parse_args(["--face", "zelda"]))
+    check(plain.palette.bar == stock.bar, "the default bar should be the stock green")
+
+    recoloured = z.build_settings(parser.parse_args(["--face", "zelda", "--color", "amber"]))
+    check(
+        recoloured.palette.bar == stock.bar,
+        f"--color must not drag the bar with it, got {recoloured.palette.bar}",
+    )
+    check(recoloured.palette.time != stock.time, "--color should still move the digits")
+
+    asked = z.build_settings(parser.parse_args(["--face", "zelda", "--bar-color", "#00ff88"]))
+    check(asked.palette.bar == (0, 255, 136), f"--bar-color should win, got {asked.palette.bar}")
+
+    # And it must actually reach the panel: the bar row is red, the digits are not.
+    pixels = z.render(datetime(2026, 9, 11, 14, 37, 30), plain).load()
+    check(pixels[0, z.BAR_ROW] == stock.bar, "the lit bar should be green on screen")
+    digit_colours = {pixels[x, y] for x in range(z.WIDTH) for y in range(z.DIGIT_H)}
+    check(stock.bar not in digit_colours, "the bar colour must not appear among the digits")
+
+
+def test_zelda_bar_steps_every_1875ms() -> None:
+    """One pixel per completed 1.875s step, counting from the minute.
+
+    The pixel must light when its step *finishes*. Rounding rather than
+    flooring -- which is what this did originally -- lit the first pixel at
+    0.94s, half a step early.
+    """
     import zelda_clockface as z
 
     settings = z.ZeldaSettings()
-    widths = []
-    for second in (0, 15, 30, 45, 59):
-        pixels = z.render(datetime(2026, 9, 11, 14, 37, second), settings).load()
-        widths.append(sum(1 for x in range(z.WIDTH) if pixels[x, z.BAR_ROW] == settings.palette.bar))
-    check(widths == sorted(widths), f"the bar should grow monotonically, got {widths}")
-    check(widths[0] == 0, f"the bar starts empty, got {widths[0]}")
-    check(widths[-1] >= z.WIDTH - 2, f"nearly full at :59, got {widths[-1]}")
+    check(z.STEP_SECONDS == 1.875, f"the step should be 60/32, got {z.STEP_SECONDS}")
+    base = datetime(2026, 9, 11, 14, 37)
+
+    def at(seconds: float) -> int:
+        whole = int(seconds)
+        micro = int(round((seconds - whole) * 1_000_000))
+        return _bar_pixels(base.replace(second=whole, microsecond=micro), settings)
+
+    # Empty for the whole first step, then one pixel exactly on the boundary.
+    check(at(0) == 0, "the bar starts empty at the minute")
+    check(at(1.0) == 0, "still empty a second in")
+    check(at(1.874) == 0, f"still empty just before the first step, got {at(1.874)}")
+    check(at(1.875) == 1, f"one pixel exactly at 1.875s, got {at(1.875)}")
+    check(at(3.749) == 1, f"still one just before the second step, got {at(3.749)}")
+    check(at(3.75) == 2, f"two pixels at 3.75s, got {at(3.75)}")
+
+    # Every boundary, all the way up.
+    for step in range(z.WIDTH):
+        moment = step * z.STEP_SECONDS
+        if moment >= 60:
+            break
+        check(
+            at(moment) == step,
+            f"{moment}s into the minute should light {step} pixels, got {at(moment)}",
+        )
+
+
+def test_zelda_bar_tops_out_one_short_and_resets() -> None:
+    """The 32nd step would land exactly on the rollover, so 31 is the maximum."""
+    import zelda_clockface as z
+
+    settings = z.ZeldaSettings()
+    base = datetime(2026, 9, 11, 14, 37)
+    check(_bar_pixels(base.replace(second=59, microsecond=999999), settings) == 31,
+          "the last step of the minute shows 31 of 32")
+    check(_bar_pixels(base.replace(minute=38, second=0), settings) == 0,
+          "and the next minute starts empty again")
+
+    counts = [_bar_pixels(base.replace(second=s), settings) for s in range(60)]
+    check(counts == sorted(counts), f"the bar must never go backwards: {counts}")
+    check(max(counts) == 31, f"it should top out at 31, got {max(counts)}")
+
+
+def test_zelda_repaints_on_the_step_grid() -> None:
+    """1 Hz would show a step up to a second late; the face asks for its own rate."""
+    import math
+
+    import zelda_clockface as z
+
+    settings = z.ZeldaSettings()
+    interval = z.tick_seconds(settings)
+    check(interval == z.STEP_SECONDS, f"the bar's rate should drive repaints, got {interval}")
+    check(60 % interval == 0, "a minute must be a whole number of steps")
+
+    # The driver aligns its deadline to multiples of the interval since the
+    # epoch; because 60 is a whole number of steps, that grid contains every
+    # minute boundary too.
+    for connect_at in (1757600000.4, 1757600017.91, 1757600059.999):
+        deadline = math.floor(connect_at / interval) * interval + interval
+        check(deadline > connect_at, "the first deadline must be in the future")
+        for _ in range(40):
+            offset = deadline % 60
+            check(
+                abs(offset / interval - round(offset / interval)) < 1e-9,
+                f"repaint at second-of-minute {offset} is off the step grid",
+            )
+            deadline += interval
+
+    check(z.tick_seconds(z.ZeldaSettings(blink_colon=True)) == 1.0,
+          "a blinking colon still needs a repaint every second")
+    check(z.tick_seconds(z.ZeldaSettings(seconds_bar=False)) == 60.0,
+          "with nothing moving inside the minute, once a minute is enough")
 
 
 def test_both_faces_expose_the_same_seam() -> None:

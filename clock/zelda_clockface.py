@@ -8,7 +8,7 @@ without knowing anything about what it draws.
     +--------------------------------+
     |  ##  ##  :  ##  ##             |  rows 0-8   HH:MM, 6x9 bold digits, cyan
     |                                |  row  9     gap
-    |#########-----------------------|  row  10    seconds bar, cyan on grey
+    |#########-----------------------|  row  10    seconds bar, green on grey
     |09/11 FRI                       |  rows 11-15 date and weekday, yellow
     +--------------------------------+
 
@@ -35,6 +35,8 @@ What had to change, and why
 
 Colours are sampled from the mockups rather than guessed: the cyan is
 (5, 250, 254), the yellow (254, 252, 11) and the unlit bar track (55, 55, 63).
+The one colour that is not from the mockup is the seconds bar, which is green
+(0, 255, 0) by choice rather than the mockup's cyan.
 """
 
 from __future__ import annotations
@@ -83,6 +85,11 @@ STRIP_H = HEIGHT - STRIP_TOP  # 5
 TEXT_SLOT = WIDTH
 RUN_GAP = 2  # pixels between the date and the weekday
 
+# One pixel of the seconds bar per step, and 32 steps fill a minute exactly.
+# 1.875 is 15/8, so it is exact in binary floating point and the 32nd step
+# lands precisely on the minute rollover rather than drifting into it.
+STEP_SECONDS = 60.0 / WIDTH
+
 # Bold 6x9 digits traced from the mockup's own glyphs: 2px strokes, corner pixels
 # cut from the top and bottom bars, and a diagonal '2' with the upper-left stub
 # the mockup gives it. The mockup's digits are 7 columns wide, which four of plus
@@ -118,7 +125,10 @@ class ZeldaPalette:
 
     time: RGB = (5, 250, 254)
     colon: RGB = (5, 250, 254)
-    bar: RGB = (5, 250, 254)
+    # Green is a deliberate departure from the mockup, where the bar matches the
+    # digits. Pure green shares no channel with the cyan above it or the yellow
+    # below, so the three rows stay separable even at a glance across a room.
+    bar: RGB = (0, 255, 0)
     bar_track: RGB = (55, 55, 63)
     date: RGB = (254, 252, 11)
     background: RGB = (0, 0, 0)
@@ -318,11 +328,20 @@ def _draw_time(frame: Frame, when: datetime, settings: ZeldaSettings) -> None:
 
 
 def _draw_seconds_bar(frame: Frame, when: datetime, settings: ZeldaSettings) -> None:
+    """One pixel per completed 1.875s step, counting from the minute.
+
+    A pixel lights when its step *finishes*, not when it starts: the bar is
+    empty for the first 1.875s of every minute, shows one pixel at 1.875s, two
+    at 3.75s, and so on. Rounding instead of flooring -- which is what this did
+    before -- lit the first pixel half a step early, at 0.94s.
+
+    The consequence worth knowing: the 32nd step would complete at exactly 60s,
+    which is the same instant the bar resets. So the bar tops out at 31 of 32
+    lit during its final step and never shows completely full.
+    """
     palette = settings.palette
-    # Microseconds included so a once-a-second repaint lands on a fresh column
-    # rather than repeating one when a write runs slightly early.
-    progress = (when.second + when.microsecond / 1_000_000) / 60.0
-    lit = int(round(progress * WIDTH))
+    elapsed = when.second + when.microsecond / 1_000_000
+    lit = min(WIDTH, int(elapsed // STEP_SECONDS))
     for x in range(WIDTH):
         put(frame, x, BAR_ROW, palette.bar if x < lit else palette.bar_track)
 
@@ -374,7 +393,7 @@ def build_settings(args: argparse.Namespace) -> ZeldaSettings:
     palette = ZeldaPalette(
         time=time,
         colon=args.colon_color or time,
-        bar=args.bar_color or time,
+        bar=args.bar_color or stock.bar,
         date=args.date_color or stock.date,
     )
     return ZeldaSettings(
@@ -391,18 +410,26 @@ def build_settings(args: argparse.Namespace) -> ZeldaSettings:
 
 
 def tick_seconds(settings: ZeldaSettings) -> float:
-    """Only the bar and the colon move within a minute now that the bottom line
-    is static, so without either there is nothing to redraw until the minute."""
-    if settings.seconds_bar or settings.blink_colon:
+    """How often this face actually changes.
+
+    The bottom line is static, so within a minute only the bar and the colon
+    move. A blinking colon forces one repaint a second; otherwise the bar's own
+    1.875s step is the natural rate -- and repainting on the step grid rather
+    than on the second is what makes each pixel appear when it is due instead of
+    up to a second late.
+    """
+    if settings.blink_colon:
         return 1.0
+    if settings.seconds_bar:
+        return STEP_SECONDS
     return 60.0
 
 
 def preview_caption(settings: ZeldaSettings) -> str:
     """Names the tiles preview_moments returns, in the same order."""
     return (
-        "the mockup's 23:59, a two-digit month, midnight, single-digit hour, "
-        "a full bar, round digits"
+        "the mockup's 23:59, a two-digit month, midnight (empty bar), "
+        "single-digit hour, the last step of the minute (31 of 32), round digits"
     )
 
 
@@ -419,7 +446,7 @@ def preview_moments(settings: ZeldaSettings) -> List[datetime]:
     cases = [
         (23, 59, 47),  # the mockup's own time
         (12, 25, 52),  # a two-digit month and day: the widest bottom line
-        (0, 0, 2),  # midnight, bar nearly empty
+        (0, 0, 1),  # midnight, inside the first step so the bar is still empty
         (9, 5, 30),  # single-digit hour
         (12, 34, 59),  # bar full
         (8, 8, 12),  # round digits

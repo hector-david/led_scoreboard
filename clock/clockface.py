@@ -170,7 +170,7 @@ class Palette:
     bar: RGB = (255, 90, 20)
     bar_track: RGB = (10, 14, 22)
     date: RGB = (255, 190, 0)
-    pm: RGB = (255, 90, 140)
+    pm: RGB = (255, 80, 140)  # == NAMED_COLORS['pink']
     background: RGB = (0, 0, 0)
 
 
@@ -410,6 +410,104 @@ def to_image(frame: Frame) -> Image.Image:
     img = Image.new("RGB", (WIDTH, HEIGHT), (0, 0, 0))
     img.putdata([frame[y][x] for y in range(HEIGHT) for x in range(WIDTH)])
     return img
+
+
+# ------------------------------------------------------------------
+# The seam custom_clock.py drives -- mirrored by zelda_clockface.py
+# ------------------------------------------------------------------
+
+
+def build_settings(args) -> FaceSettings:
+    """Map the shared CLI flags onto this face.
+
+    Colour and tri-state flags arrive as None when the user did not pass them,
+    so each face supplies its own defaults and `--face` can be switched without
+    silently inheriting the other face's palette.
+    """
+    stock = Palette()
+    time = args.color or stock.time
+    palette = Palette(
+        time=time,
+        colon=args.colon_color or time,
+        bar=args.bar_color or stock.bar,
+        date=args.date_color or stock.date,
+        pm=args.pm_color or stock.pm,
+    )
+    return FaceSettings(
+        h24=args.h24 if args.h24 is not None else False,
+        seconds_bar=not args.no_bar,
+        bar_height=args.bar_height,
+        blink_colon=args.blink_colon if args.blink_colon is not None else True,
+        pm_dot=not args.no_pm_dot,
+        leading_zero=args.leading_zero if args.leading_zero is not None else False,
+        show_date=args.date,
+        date_format=args.date_format,
+        date_every=args.date_every,
+        date_for=args.date_for,
+        glow=args.glow,
+        palette=palette,
+    )
+
+
+def tick_seconds(settings: FaceSettings) -> float:
+    """How often the picture actually changes.
+
+    Repainting every second when nothing on screen moves per second is a wasted
+    BLE write and a wasted chance for the link to drop mid-frame.
+    """
+    if settings.seconds_bar or settings.blink_colon or settings.show_date:
+        return 1.0
+    return 60.0
+
+
+def preview_caption(settings: FaceSettings) -> str:
+    """Names the tiles preview_moments returns, in the same order."""
+    cases = "midnight, single-digit hour, 11:59, noon, afternoon, end of day"
+    return cases + ", date line" if settings.show_date else cases
+
+
+def validation_moments(settings: FaceSettings, now: datetime) -> List[datetime]:
+    """Extra times the pre-flight must render before the radio is touched.
+
+    The date only shows for a few seconds of each cycle, so rendering `now`
+    alone would let a bad `--date-format` wait until the run is live to raise.
+    Second 0 is always inside the window.
+    """
+    return [now.replace(second=0)] if settings.show_date else []
+
+
+def preview_moments(settings: FaceSettings) -> List[datetime]:
+    """Times chosen to catch the layout cases that actually break.
+
+    Seconds are nudged clear of the date window, so turning `--date` on cannot
+    quietly replace the very tile you were trying to inspect.
+    """
+    day = datetime.now().date()
+    midnight = datetime.combine(day, datetime.min.time())
+
+    def clear_of_date(second: int) -> int:
+        if not settings.show_date:
+            return second
+        for offset in range(60):
+            candidate = (second + offset) % 60
+            if candidate % settings.date_every >= settings.date_for:
+                return candidate
+        return second
+
+    cases = [
+        (0, 0, 0),  # midnight: 12-hour faces must show 12, never 0
+        (9, 5, 7),  # single-digit hour: the narrow layout
+        (11, 59, 59),  # bar nearly full, still AM
+        (12, 0, 30),  # noon: PM marker turns on
+        (14, 37, 33),  # ordinary afternoon
+        (23, 59, 58),  # last minute of the day
+    ]
+    moments = [
+        midnight.replace(hour=h, minute=m, second=clear_of_date(s)) for h, m, s in cases
+    ]
+    if settings.show_date:
+        moments.append(midnight.replace(hour=14, minute=37, second=0))
+    return moments
 
 
 def preview_sheet(

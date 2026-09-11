@@ -13,8 +13,9 @@ That is the whole point, and it is a firmware feature, not a trick.
 | --- | --- |
 | `ipixel_clock.py` | The two clock commands, the device-info reply, `ClockPanel`. |
 | `send_clock.py` | **Send once, forget.** Sets the time and picks the face. |
-| `clockface.py` | Renders a custom face to a 32×16 image. No BLE. |
-| `custom_clock.py` | Pushes that custom face live, and hands the panel back on exit. |
+| `clockface.py` | The default custom face — 32×16 image, no BLE. |
+| `zelda_clockface.py` | The Zelda face, drawn from `zelda/*.png`. |
+| `custom_clock.py` | Pushes a custom face live, and hands the panel back on exit. |
 | `test_clock.py` | Offline checks — packet vectors, layout, fonts. `py test_clock.py` |
 
 Transport, framing and the BLE connection pattern are reused from `../gif/ipixel.py`
@@ -196,6 +197,76 @@ write cycles, leaves nothing behind, and cannot brick the panel with bad content
 on the next boot — all three of which a numbered slot repainted once a second
 would risk. Sending invalid content to a numbered slot is a documented way to put
 these panels into a boot loop.
+
+### The Zelda face
+
+```powershell
+py custom_clock.py --face zelda --preview zelda.png   # look first
+py custom_clock.py --face zelda                       # push it live
+```
+
+Bold cyan 24-hour digits, a cyan seconds bar, and a yellow date line flanked by
+two Triforces — drawn from the mockups in `zelda/1.png` … `zelda/5.png` (which
+are one design at five different bar fills). Colours are sampled from those
+files, not guessed: cyan `(5,250,254)`, yellow `(254,252,11)`, pink
+`(251,68,149)`, unlit track `(55,55,63)`.
+
+```
++--------------------------------+
+|  ##  ##  :  ##  ##             |  rows 0-8   HH:MM, 6x9 bold digits
+|                                |  row  9     gap
+|#########-----------------------|  row  10    seconds bar
+| /\  09/10                 /\   |  rows 11-15 Triforce, date, Triforce
++--------------------------------+
+```
+
+**Three things had to change**, because the mockup is a 38×20 grid and this
+panel is 32×16:
+
+- The mockup's date line reads `09/10 TUE`. Nine 3×5 characters plus gaps is
+  35px — wider than the panel even with the crests removed. So the middle slot
+  **alternates** between the date and the weekday every 5 seconds (`--swap-every`)
+  instead of showing both at once.
+- The digits are 9 rows rather than 11 — but 9 of 16 is 56%, against the
+  mockup's 11 of 20 at 55%, so the proportion survives even though the pixel
+  count doesn't.
+- The mockup has a blank row either side of the seconds bar. There's budget for
+  one, so it sits above the bar, at the busier boundary.
+
+It draws the **Triforce** rather than the winged Hyrule crest from the mockup.
+At five pixels across the crest's wings collapse into a blob; the Triforce
+survives the resolution and is the more legible emblem for it.
+
+Each face applies its own defaults, so `--face zelda` gets 24-hour time and the
+sampled cyan while the default face stays 12-hour. The flags divide into three
+groups:
+
+| Works on both | Zelda only | Default face only |
+| --- | --- | --- |
+| `--color` `--colon-color` `--bar-color` `--date-color` | `--crest-color` | `--pm-color` |
+| `--no-bar` `--glow` `--12h`/`--24h` | `--no-crests` | `--no-pm-dot` `--bar-height` |
+| `--blink`/`--no-blink` `--leading-zero` `--date-format` | `--weekday-format` `--swap-every` | `--date` `--date-every` `--date-for` |
+
+Flags from the wrong column are accepted and ignored rather than rejected, so
+switching `--face` never means rewriting the command.
+
+A date format too wide for the 20px slot between the Triforces is refused on the
+command line rather than mid-run:
+
+```
+error: weekday_format '%A' renders 'MONDAY' at 23px, but the slot between
+the Triforces is 20px (5 characters)
+```
+
+### Adding your own face
+
+`custom_clock.py` drives faces through a small seam, so a new one is a new
+module rather than an edit to the driver. Expose `WIDTH`, `HEIGHT`,
+`build_settings(args)`, `render(when, settings)`, `tick_seconds(settings)`,
+`preview_moments(settings)`, `validation_moments(settings, now)`,
+`preview_caption(settings)` and `preview_sheet(...)`, then add it to the `FACES`
+dict. `test_clock.py` asserts every registered face implements the whole seam.
+
 
 ## Troubleshooting
 

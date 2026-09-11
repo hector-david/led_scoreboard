@@ -5,6 +5,11 @@
     py custom_clock.py --color amber --no-bar --glow 0.25
     py custom_clock.py --duration 60              # run for a minute, then hand back
     py custom_clock.py --retry 10                 # wait 10s between reconnects
+    py custom_clock.py --face zelda               # the Zelda design from zelda/*.png
+
+Two faces ship: `default` (clockface.py) and `zelda` (zelda_clockface.py, traced
+from the mockups in zelda/). Pick one with --face; each applies its own colours
+and clock format, and the shared design flags override either.
 
 It survives the panel going away. Unplug it, walk out of range, or let the phone
 app steal the link, and this drops into a reconnect loop -- every 5 seconds,
@@ -37,20 +42,14 @@ import sys
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional, Tuple
+from typing import Optional, Tuple
 
 from bleak.exc import BleakError
 from PIL import Image
 
-from clockface import (
-    HEIGHT,
-    WIDTH,
-    FaceSettings,
-    Palette,
-    parse_color,
-    preview_sheet,
-    render,
-)
+import clockface
+import zelda_clockface
+from clockface import HEIGHT, WIDTH, parse_color
 from ipixel_clock import (
     ACK_ACCEPTED,
     DOCUMENTED_STYLE_MAX,
@@ -59,6 +58,11 @@ from ipixel_clock import (
     ClockSettings,
     PanelError,
 )
+
+# Each face is a module exposing the same seam: build_settings, render,
+# tick_seconds, preview_moments, validation_moments, preview_sheet. Adding a
+# face means adding a module here, not editing the driver.
+FACES = {"default": clockface, "zelda": zelda_clockface}
 
 # Slot 0 is "show now, do not store". It costs no EEPROM write cycles, cannot
 # leave a half-written slot behind, and cannot brick the panel with bad content
@@ -84,41 +88,6 @@ def encode_png(img: Image.Image) -> bytes:
     buf = io.BytesIO()
     img.save(buf, format="PNG", compress_level=9, optimize=True, icc_profile=None)
     return buf.getvalue()
-
-
-def build_face_settings(args: argparse.Namespace) -> FaceSettings:
-    palette = Palette(
-        time=args.color,
-        colon=args.colon_color if args.colon_color else args.color,
-        bar=args.bar_color,
-        date=args.date_color,
-        pm=args.pm_color,
-    )
-    return FaceSettings(
-        h24=args.h24,
-        seconds_bar=not args.no_bar,
-        bar_height=args.bar_height,
-        blink_colon=not args.no_blink,
-        pm_dot=not args.no_pm_dot,
-        leading_zero=args.leading_zero,
-        show_date=args.date,
-        date_format=args.date_format,
-        date_every=args.date_every,
-        date_for=args.date_for,
-        glow=args.glow,
-        palette=palette,
-    )
-
-
-def tick_seconds(settings: FaceSettings) -> float:
-    """How often the picture actually changes.
-
-    Repainting every second when nothing on screen moves per second is a wasted
-    BLE write and a wasted chance for the link to drop mid-frame.
-    """
-    if settings.seconds_bar or settings.blink_colon or settings.show_date:
-        return 1.0
-    return 60.0
 
 
 async def hand_back(panel: ClockPanel, settings: ClockSettings) -> bool:
@@ -219,7 +188,8 @@ def _should_log(attempt: int) -> bool:
 
 async def _stream(
     panel: ClockPanel,
-    face: FaceSettings,
+    faces,
+    face,
     interrupt: "_Interrupt",
     *,
     slot: int,
@@ -241,7 +211,7 @@ async def _stream(
         if duration is not None and time.monotonic() - started >= duration:
             return "duration", frames
 
-        payload = encode_png(render(datetime.now(), face))
+        payload = encode_png(faces.render(datetime.now(), face))
         if not checked_size:
             checked_size = True
             if len(payload) > FRAME_WARN_BYTES:
@@ -278,9 +248,10 @@ async def _stream(
 
 
 async def drive(
-    face: FaceSettings,
+    face,
     fallback: ClockSettings,
     *,
+    faces=clockface,
     name: Optional[str],
     slot: int,
     brightness: Optional[int],
@@ -296,7 +267,7 @@ async def drive(
     end the run are Ctrl-C, `--duration`, or a design that cannot render.
     """
     kwargs = {"name": name} if name else {}
-    interval = tick_seconds(face)
+    interval = faces.tick_seconds(face)
     frames = 0
     started = time.monotonic()
     handed_back = False
@@ -334,7 +305,7 @@ async def drive(
                             f"{interval:g}s. Ctrl-C to stop and hand the panel back."
                         )
                     reason, sent = await _stream(
-                        panel, face, interrupt,
+                        panel, faces, face, interrupt,
                         slot=slot, interval=interval, started=started, duration=duration,
                     )
                     frames += sent
@@ -395,45 +366,8 @@ async def drive(
     return 1
 
 
-def preview_moments(settings: FaceSettings) -> List[datetime]:
-    """Times chosen to catch the layout cases that actually break.
-
-    Seconds are nudged clear of the date window, so turning `--date` on cannot
-    quietly replace the very tile you were trying to inspect.
-    """
-    day = datetime.now().date()
-
-    def clear_of_date(second: int) -> int:
-        if not settings.show_date:
-            return second
-        for offset in range(60):
-            candidate = (second + offset) % 60
-            if candidate % settings.date_every >= settings.date_for:
-                return candidate
-        return second
-
-    cases = [
-        (0, 0, 0),  # midnight: 12-hour faces must show 12, never 0
-        (9, 5, 7),  # single-digit hour: the narrow layout
-        (11, 59, 59),  # bar nearly full, still AM
-        (12, 0, 30),  # noon: PM marker turns on
-        (14, 37, 33),  # ordinary afternoon
-        (23, 59, 58),  # last minute of the day
-    ]
-    moments = [
-        datetime.combine(day, datetime.min.time()).replace(
-            hour=h, minute=m, second=clear_of_date(s)
-        )
-        for h, m, s in cases
-    ]
-    if settings.show_date:
-        moments.append(
-            datetime.combine(day, datetime.min.time()).replace(hour=14, minute=37, second=0)
-        )
-    return moments
-
-
-def main(argv=None) -> int:
+def build_parser() -> argparse.ArgumentParser:
+    """Split out from main so the defaults can be exercised in tests."""
     p = argparse.ArgumentParser(
         description="Render a custom clock face and push it to the 32x16 iPixel panel.",
         formatter_class=argparse.ArgumentDefaultsHelpFormatter,
@@ -442,26 +376,50 @@ def main(argv=None) -> int:
             "back to its own clock, which does not need a connection."
         ),
     )
-    design = p.add_argument_group("design")
-    design.add_argument("--color", type=parse_color, default="cyan", help="digit colour")
+    p.add_argument(
+        "--face",
+        choices=sorted(FACES),
+        default="default",
+        help="which face to draw: 'default' or the Zelda design from zelda/*.png",
+    )
+
+    # Colour and tri-state flags default to None so each face can supply its own
+    # look. Hard-coding one face's defaults here would mean `--face zelda`
+    # silently inherited the other face's palette and 12-hour clock.
+    design = p.add_argument_group("design (shared; each face applies its own defaults)")
+    design.add_argument("--color", type=parse_color, help="digit colour [face default]")
     design.add_argument("--colon-color", type=parse_color, help="defaults to the digit colour")
-    design.add_argument("--bar-color", type=parse_color, default="orange")
-    design.add_argument("--date-color", type=parse_color, default="yellow")
-    design.add_argument("--pm-color", type=parse_color, default="pink")
+    design.add_argument("--bar-color", type=parse_color, help="seconds bar colour [face default]")
+    design.add_argument("--date-color", type=parse_color, help="date line colour [face default]")
+    design.add_argument("--pm-color", type=parse_color, help="PM marker colour [default face]")
+    design.add_argument("--crest-color", type=parse_color, help="Triforce colour [zelda face]")
     design.add_argument("--no-bar", action="store_true", help="drop the seconds bar")
-    design.add_argument("--bar-height", type=int, default=2, help="seconds bar rows")
-    design.add_argument("--no-blink", action="store_true", help="steady colon")
+    design.add_argument("--bar-height", type=int, default=2, help="bar rows (default face)")
     design.add_argument("--no-pm-dot", action="store_true", help="drop the PM marker")
-    design.add_argument("--leading-zero", action="store_true", help="09:05 rather than 9:05")
+    design.add_argument("--no-crests", action="store_true", help="drop the Triforces")
     design.add_argument("--glow", type=float, default=0.0, help="LED bleed, 0.0-1.0")
+
     fmt = design.add_mutually_exclusive_group()
-    fmt.add_argument("--24h", dest="h24", action="store_true", help="24-hour face")
-    fmt.add_argument("--12h", dest="h24", action="store_false", help="12-hour face")
-    p.set_defaults(h24=False)
-    design.add_argument("--date", action="store_true", help="alternate the date in")
+    fmt.add_argument("--24h", dest="h24", action="store_true", default=None, help="24-hour face")
+    fmt.add_argument("--12h", dest="h24", action="store_false", default=None, help="12-hour face")
+    blink = design.add_mutually_exclusive_group()
+    blink.add_argument("--blink", dest="blink_colon", action="store_true", default=None,
+                       help="blink the colon once a second")
+    blink.add_argument("--no-blink", dest="blink_colon", action="store_false", default=None,
+                       help="steady colon")
+    zero = design.add_mutually_exclusive_group()
+    zero.add_argument("--leading-zero", dest="leading_zero", action="store_true", default=None,
+                      help="09:05 rather than 9:05")
+    zero.add_argument("--no-leading-zero", dest="leading_zero", action="store_false", default=None,
+                      help="9:05 rather than 09:05")
+
+    design.add_argument("--date", action="store_true", help="alternate the date in (default face)")
     design.add_argument("--date-format", default="%m/%d", help="strftime for the date line")
-    design.add_argument("--date-every", type=int, default=20, help="date cycle, seconds")
-    design.add_argument("--date-for", type=int, default=5, help="date dwell, seconds")
+    design.add_argument("--date-every", type=int, default=20, help="date cycle (default face)")
+    design.add_argument("--date-for", type=int, default=5, help="date dwell (default face)")
+    design.add_argument("--weekday-format", default="%a", help="strftime for the weekday (zelda)")
+    design.add_argument("--swap-every", type=int, default=5,
+                        help="seconds between date and weekday (zelda)")
 
     run = p.add_argument_group("running")
     run.add_argument("--preview", type=Path, help="write a contact sheet and exit")
@@ -484,10 +442,15 @@ def main(argv=None) -> int:
     run.add_argument(
         "--handback-style", type=int, default=0, help=f"built-in face to restore, 0-{STYLE_MAX}"
     )
-    args = p.parse_args(argv)
+    return p
+
+
+def main(argv=None) -> int:
+    args = build_parser().parse_args(argv)
+    faces = FACES[args.face]
 
     try:
-        face = build_face_settings(args)
+        face = faces.build_settings(args)
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
@@ -514,19 +477,22 @@ def main(argv=None) -> int:
     # than twenty seconds into a live run with the panel already connected.
     try:
         now = datetime.now()
-        sample = encode_png(render(now, face))
-        if face.show_date:
-            encode_png(render(now.replace(second=0), face))
+        sample = encode_png(faces.render(now, face))
+        for moment in faces.validation_moments(face, now):
+            encode_png(faces.render(moment, face))
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
-    print(f"Face renders to {len(sample)} bytes of PNG at {WIDTH}x{HEIGHT}.")
+    print(
+        f"Face {args.face!r} renders to {len(sample)} bytes of PNG at "
+        f"{faces.WIDTH}x{faces.HEIGHT}."
+    )
 
     if args.preview:
-        cases = "midnight, single-digit hour, 11:59, noon, afternoon, end of day"
-        if face.show_date:
-            cases += ", date line"
-        sheet = preview_sheet(preview_moments(face), face, scale=max(1, args.scale))
+        cases = faces.preview_caption(face)
+        sheet = faces.preview_sheet(
+            faces.preview_moments(face), face, scale=max(1, args.scale)
+        )
         try:
             if args.preview.parent != Path(""):
                 args.preview.parent.mkdir(parents=True, exist_ok=True)
@@ -542,12 +508,16 @@ def main(argv=None) -> int:
     if args.slot != LIVE_SLOT:
         print(
             f"  warning: slot {args.slot} is a stored slot. Repainting it every "
-            f"{tick_seconds(face):g}s burns EEPROM write cycles and risks leaving bad "
+            f"{faces.tick_seconds(face):g}s burns EEPROM write cycles and risks leaving bad "
             "content behind. Slot 0 shows immediately and stores nothing.",
             file=sys.stderr,
         )
 
-    fallback = ClockSettings(style=args.handback_style, h24=args.h24, show_date=args.date)
+    # The firmware fallback should look as much like the face it replaces as
+    # the nine built-in styles allow.
+    fallback = ClockSettings(
+        style=args.handback_style, h24=face.h24, show_date=face.show_date
+    )
     print("Close the iPixel phone app first -- only one BLE central can hold the link.")
 
     try:
@@ -555,6 +525,7 @@ def main(argv=None) -> int:
             drive(
                 face,
                 fallback,
+                faces=faces,
                 name=args.name,
                 slot=args.slot,
                 brightness=args.brightness,

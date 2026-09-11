@@ -492,6 +492,261 @@ def test_palette_is_configurable() -> None:
 
 
 # ------------------------------------------------------------------
+# The Zelda face
+# ------------------------------------------------------------------
+
+
+def test_zelda_layout_fills_the_panel_exactly() -> None:
+    """The row budget is the whole design; a bad edit must not go unnoticed."""
+    import zelda_clockface as z
+
+    check(z.STRIP_TOP + z.STRIP_H == z.HEIGHT, "the strip must end at the last row")
+    check(z.BAR_ROW == z.DIGIT_H + 1, "one gap row between the digits and the bar")
+    check(z.STRIP_H >= 5, "the 3x5 date font needs five rows")
+    widest = 4 * z.DIGIT_W + z.COLON_W + 4 * 1
+    check(widest <= z.WIDTH, f"HH:MM needs {widest}px, panel is {z.WIDTH}")
+
+
+def test_zelda_fonts_are_well_formed() -> None:
+    import zelda_clockface as z
+
+    for ch, rows in z.BOLD_DIGITS.items():
+        check(len(rows) == z.DIGIT_H, f"digit {ch!r} has {len(rows)} rows")
+        for i, row in enumerate(rows):
+            check(len(row) == z.DIGIT_W, f"digit {ch!r} row {i} is {len(row)} wide")
+            check(
+                set(row) <= {"0", "1", ".", "#"},
+                f"digit {ch!r} row {i} uses something other than 0/1/./#",
+            )
+    for digit in "0123456789":
+        check(digit in z.BOLD_DIGITS, f"missing digit {digit}")
+    lit = lambda rows: sum(1 for r in rows for c in r if c not in z.DARK)
+    for ch, rows in z.BOLD_DIGITS.items():
+        check(lit(rows) > 0, f"digit {ch!r} renders nothing -- wrong lit/dark alphabet?")
+    check(len(z.TRIFORCE) == z.CREST_H, "the Triforce is three rows")
+    check(all(len(r) == z.CREST_W for r in z.TRIFORCE), "the Triforce is five wide")
+
+
+def test_zelda_date_never_collides_with_a_triforce() -> None:
+    """19px of date between two 5px crests leaves 1px either side. Prove it."""
+    import zelda_clockface as z
+
+    settings = z.ZeldaSettings()
+    palette = settings.palette
+    base = datetime(2026, 1, 1, 13, 37)
+    for day in range(0, 366, 11):
+        for second in (0, settings.swap_every):
+            when = base + timedelta(days=day, seconds=second)
+            pixels = z.render(when, settings).load()
+            crest, text = set(), set()
+            for x in range(z.WIDTH):
+                for y in range(z.STRIP_TOP, z.HEIGHT):
+                    if pixels[x, y] == palette.crest:
+                        crest.add(x)
+                    elif pixels[x, y] == palette.date:
+                        text.add(x)
+            check(bool(text), f"{when:%m/%d %S} drew no date text")
+            check(
+                not (crest & text),
+                f"{when:%m/%d} second {second}: date and Triforce share columns {sorted(crest & text)}",
+            )
+
+
+def test_zelda_alternates_date_and_weekday() -> None:
+    """The mockup shows both at once; 32 columns cannot, so they take turns."""
+    import zelda_clockface as z
+
+    settings = z.ZeldaSettings(swap_every=5)
+    when = datetime(2026, 9, 11, 23, 59)
+    seen = {z.bottom_text(when.replace(second=s), settings) for s in range(60)}
+    check("09/11" in seen, f"the date should appear, got {seen}")
+    check("FRI" in seen, f"the weekday should appear, got {seen}")
+    check(len(seen) == 2, f"exactly two texts should cycle, got {seen}")
+    # ...and each holds for exactly swap_every seconds, including across :59.
+    runs = [z.bottom_text(when.replace(second=s), settings) for s in range(60)]
+    check(runs[0] != runs[5], "the slot should have swapped by second 5")
+    check(runs[0] == runs[59 - 49], "the cycle should tile the minute")
+
+
+def test_zelda_rejects_text_too_wide_for_the_slot() -> None:
+    """The slot is 20px. A format that overflows must fail on the command line."""
+    import zelda_clockface as z
+
+    for fmt in ("%Y-%m-%d", "%A", "%m/%d/%Y"):
+        try:
+            z.ZeldaSettings(date_format=fmt)
+        except ValueError:
+            continue
+        raise Failure(f"date_format {fmt!r} does not fit {z.TEXT_SLOT}px and should have raised")
+    for fmt in ("%m/%d", "%a", "%H:%M"):
+        z.ZeldaSettings(date_format=fmt)  # must not raise
+
+
+def test_zelda_swap_every_must_tile_a_minute() -> None:
+    import zelda_clockface as z
+
+    for bad in (7, 11, 4, 0, -1):
+        try:
+            z.ZeldaSettings(swap_every=bad)
+        except ValueError:
+            continue
+        raise Failure(f"swap_every={bad} should have raised")
+    for good in (1, 3, 5, 15):
+        z.ZeldaSettings(swap_every=good)
+
+
+def test_zelda_preview_tiles_match_their_caption() -> None:
+    """The caption is printed to the user, so tile 1 must really be the date.
+
+    The seconds were literals once, which inverted the pair for every
+    `swap_every` but the default -- and the caption reads the opposite way round.
+    """
+    import zelda_clockface as z
+
+    for swap in (1, 3, 5, 15):
+        settings = z.ZeldaSettings(swap_every=swap)
+        moments = z.preview_moments(settings)
+        first = z.bottom_text(moments[0], settings)
+        second = z.bottom_text(moments[1], settings)
+        check(first[0].isdigit(), f"swap_every={swap}: tile 1 should be the date, got {first!r}")
+        check(second.isalpha(), f"swap_every={swap}: tile 2 should be the weekday, got {second!r}")
+        check("date" in z.preview_caption(settings), "the caption should still name the date")
+
+
+def test_zelda_no_crests_frees_the_columns() -> None:
+    """Dropping the Triforces should widen the text budget, not just hide them."""
+    import zelda_clockface as z
+
+    check(z.ZeldaSettings(crests=True).text_slot == z.TEXT_SLOT, "crests narrow the slot")
+    check(z.ZeldaSettings(crests=False).text_slot == z.WIDTH, "no crests means the whole panel")
+    # 8 characters is 31px: too wide between the Triforces, fine without them.
+    z.ZeldaSettings(crests=False, date_format="%m/%d/%y")
+    try:
+        z.ZeldaSettings(crests=True, date_format="%m/%d/%y")
+    except ValueError as exc:
+        check("Triforces" in str(exc), f"the message should name what is in the way: {exc}")
+        return
+    raise Failure("with crests on, an 8-character date should not fit")
+
+
+def test_zelda_strip_refuses_rather_than_overdrawing() -> None:
+    """Defence in depth: a format past the probe set must raise, not eat a crest."""
+    import zelda_clockface as z
+
+    settings = z.ZeldaSettings()
+    # Reach past __post_init__ by mutating the frozen instance the hard way, the
+    # way a future probe-set gap would.
+    object.__setattr__(settings, "date_format", "%m/%d/%Y")
+    try:
+        z.render(datetime(2026, 9, 11, 12, 0, 0), settings)
+    except ValueError as exc:
+        check("px" in str(exc), f"the message should give the width: {exc}")
+        return
+    raise Failure("an over-wide date must raise from the renderer, not overdraw a Triforce")
+
+
+def test_zelda_glow_is_the_shared_implementation() -> None:
+    """It used to be a local copy justified by a difference that did not exist."""
+    import clockface
+    import zelda_clockface as z
+
+    check(z.apply_glow is clockface.apply_glow, "the glow should be the shared one")
+    plain = z.render(datetime(2026, 9, 11, 23, 59, 47), z.ZeldaSettings(glow=0.0)).load()
+    lit = z.render(datetime(2026, 9, 11, 23, 59, 47), z.ZeldaSettings(glow=0.4)).load()
+    for x in range(z.WIDTH):
+        for y in range(z.HEIGHT):
+            if plain[x, y] != (0, 0, 0):
+                check(lit[x, y] == plain[x, y], f"glow changed a lit pixel at {x},{y}")
+
+
+def test_palette_defaults_match_the_named_colours() -> None:
+    """The CLI defaults used to be named colours; the dataclass must agree."""
+    palette = Palette()
+    from clockface import NAMED_COLORS
+
+    for field_name, name in (("time", "cyan"), ("bar", "orange"),
+                             ("date", "yellow"), ("pm", "pink")):
+        check(
+            getattr(palette, field_name) == NAMED_COLORS[name],
+            f"Palette.{field_name} is {getattr(palette, field_name)}, "
+            f"but --{field_name}-color {name} gives {NAMED_COLORS[name]}",
+        )
+
+
+def test_zelda_twelve_hour_still_never_shows_zero() -> None:
+    import zelda_clockface as z
+
+    twelve = z.ZeldaSettings(h24=False, leading_zero=False)
+    check(z.clock_text(datetime(2026, 9, 11, 0, 0), twelve) == "12:00", "midnight is 12")
+    check(z.clock_text(datetime(2026, 9, 11, 13, 5), twelve) == "1:05", "13:05 is 1:05")
+    twentyfour = z.ZeldaSettings(h24=True)
+    check(z.clock_text(datetime(2026, 9, 11, 0, 0), twentyfour) == "00:00", "24h midnight")
+    check(z.clock_text(datetime(2026, 9, 11, 23, 59), twentyfour) == "23:59", "the mockup's time")
+
+
+def test_zelda_every_minute_fits_the_panel() -> None:
+    import zelda_clockface as z
+
+    for settings in (z.ZeldaSettings(h24=True), z.ZeldaSettings(h24=False, leading_zero=False)):
+        for hour in range(24):
+            for minute in range(60):
+                text = z.clock_text(datetime(2026, 9, 11, hour, minute), settings)
+                width = z.time_layout_width(text)
+                check(width <= z.WIDTH, f"{text!r} needs {width}px, panel is {z.WIDTH}")
+
+
+def test_zelda_seconds_bar_fills_over_a_minute() -> None:
+    import zelda_clockface as z
+
+    settings = z.ZeldaSettings()
+    widths = []
+    for second in (0, 15, 30, 45, 59):
+        pixels = z.render(datetime(2026, 9, 11, 14, 37, second), settings).load()
+        widths.append(sum(1 for x in range(z.WIDTH) if pixels[x, z.BAR_ROW] == settings.palette.bar))
+    check(widths == sorted(widths), f"the bar should grow monotonically, got {widths}")
+    check(widths[0] == 0, f"the bar starts empty, got {widths[0]}")
+    check(widths[-1] >= z.WIDTH - 2, f"nearly full at :59, got {widths[-1]}")
+
+
+def test_both_faces_expose_the_same_seam() -> None:
+    """custom_clock.py drives faces through this contract and nothing else."""
+    import custom_clock
+
+    required = (
+        "WIDTH", "HEIGHT", "render", "build_settings", "tick_seconds",
+        "preview_moments", "preview_sheet", "preview_caption", "validation_moments",
+    )
+    for name, module in custom_clock.FACES.items():
+        for attr in required:
+            check(hasattr(module, attr), f"face {name!r} is missing {attr}")
+        check(module.WIDTH == WIDTH and module.HEIGHT == HEIGHT,
+              f"face {name!r} renders {module.WIDTH}x{module.HEIGHT}")
+
+
+def test_face_settings_carry_what_the_driver_reads() -> None:
+    """`drive` reads face.h24 and face.show_date to build the firmware fallback."""
+    import custom_clock
+
+    for name, module in custom_clock.FACES.items():
+        settings = module.build_settings(_default_args())
+        check(isinstance(settings.h24, bool), f"face {name!r} has no usable h24")
+        check(isinstance(settings.show_date, bool), f"face {name!r} has no usable show_date")
+        img = module.render(datetime(2026, 9, 11, 23, 59, 47), settings)
+        check(img.size == (WIDTH, HEIGHT), f"face {name!r} rendered {img.size}")
+
+
+def _default_args():
+    """Exactly what `custom_clock.py` hands a face when no flags are passed.
+
+    Built by running the real parser rather than hand-listing defaults, so a new
+    flag cannot drift out of sync with this test.
+    """
+    import custom_clock
+
+    return custom_clock.build_parser().parse_args([])
+
+
+# ------------------------------------------------------------------
 # The hand-back, against a stub panel
 # ------------------------------------------------------------------
 
@@ -681,10 +936,10 @@ def test_duration_does_not_overshoot_a_static_face() -> None:
     """A face with nothing per-second ticks once a minute; the wait must be clamped."""
     import time as _time
 
-    import custom_clock
+    import clockface
 
     static = FaceSettings(seconds_bar=False, blink_colon=False, show_date=False)
-    check(custom_clock.tick_seconds(static) == 60.0, "a static face should tick once a minute")
+    check(clockface.tick_seconds(static) == 60.0, "a static face should tick once a minute")
 
     panel = _StubPanel()
     started = _time.monotonic()

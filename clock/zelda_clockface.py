@@ -1,4 +1,4 @@
-r"""The Zelda face: bold cyan 24-hour digits, a seconds bar, and a date line.
+r"""The Zelda face: bold cyan 12-hour digits, a seconds bar, and a date line.
 
 Drawn from the mockups in `zelda/1.png` .. `zelda/5.png` (the five are one design
 at five different seconds-bar fills). Same contract as `clockface.py` -- give it a
@@ -138,11 +138,11 @@ class ZeldaPalette:
 class ZeldaSettings:
     """The design surface for this face.
 
-    `h24` defaults true because the mockup shows 23:59 -- a 12-hour Zelda clock
-    is available, it just is not what was drawn.
+    `h24` defaults false: the mockup was drawn at 23:59, but a 12-hour readout
+    is what this panel is actually wanted for. `--24h` restores the mockup.
     """
 
-    h24: bool = True
+    h24: bool = False
     seconds_bar: bool = True
     blink_colon: bool = False
     leading_zero: bool = True
@@ -397,7 +397,7 @@ def build_settings(args: argparse.Namespace) -> ZeldaSettings:
         date=args.date_color or stock.date,
     )
     return ZeldaSettings(
-        h24=args.h24 if args.h24 is not None else True,
+        h24=args.h24 if args.h24 is not None else False,
         seconds_bar=not args.no_bar,
         # Steady by default: the mockup's colon does not blink.
         blink_colon=args.blink_colon if args.blink_colon is not None else False,

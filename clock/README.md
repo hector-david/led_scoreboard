@@ -205,7 +205,7 @@ py custom_clock.py --face zelda --preview zelda.png   # look first
 py custom_clock.py --face zelda                       # push it live
 ```
 
-Bold cyan 24-hour digits, a green seconds bar, and a yellow line carrying the
+Bold cyan 12-hour digits, a green seconds bar, and a yellow line carrying the
 date and the weekday together — drawn from the mockups in `zelda/1.png` …
 `zelda/5.png` (which are one design at five different bar fills). Colours are
 sampled from those files, not guessed: cyan `(5,250,254)`, yellow
@@ -256,9 +256,10 @@ second, and the driver aligns its schedule to the wall clock — so each pixel
 appears when it is due instead of up to a second late. With `--blink` it falls
 back to 1 Hz, since a blinking colon needs it.
 
-Each face applies its own defaults, so `--face zelda` gets 24-hour time and the
-sampled cyan while the default face stays 12-hour. The flags divide into three
-groups:
+Each face applies its own defaults, so `--face zelda` gets the sampled cyan and
+a zero-padded readout where the default face pads nothing. Both faces show
+12-hour time; `--24h` switches either one, and restores the Zelda mockup's
+`23:59`. The flags divide into three groups:
 
 | Works on both | Zelda only | Default face only |
 | --- | --- | --- |

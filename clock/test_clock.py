@@ -691,17 +691,17 @@ def test_zelda_bar_has_its_own_colour_independent_of_the_digits() -> None:
     check(stock.bar != stock.date, "nor the date line below it")
 
     parser = custom_clock.build_parser()
-    plain = z.build_settings(parser.parse_args(["--face", "zelda"]))
+    plain = z.build_settings(parser.parse_args(["--v", "2.0"]))
     check(plain.palette.bar == stock.bar, "the default bar should be the stock green")
 
-    recoloured = z.build_settings(parser.parse_args(["--face", "zelda", "--color", "amber"]))
+    recoloured = z.build_settings(parser.parse_args(["--v", "2.0", "--color", "amber"]))
     check(
         recoloured.palette.bar == stock.bar,
         f"--color must not drag the bar with it, got {recoloured.palette.bar}",
     )
     check(recoloured.palette.time != stock.time, "--color should still move the digits")
 
-    asked = z.build_settings(parser.parse_args(["--face", "zelda", "--bar-color", "#00ff88"]))
+    asked = z.build_settings(parser.parse_args(["--v", "2.0", "--bar-color", "#00ff88"]))
     check(asked.palette.bar == (0, 255, 136), f"--bar-color should win, got {asked.palette.bar}")
 
     # And it must actually reach the panel: the bar row is red, the digits are not.

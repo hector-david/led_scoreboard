@@ -5,13 +5,13 @@
     py custom_clock.py --color amber --no-bar --glow 0.25
     py custom_clock.py --duration 60              # run for a minute, then hand back
     py custom_clock.py --retry 10                 # wait 10s between reconnects
-    py custom_clock.py --face zelda               # the Zelda design from zelda/*.png
+    py custom_clock.py --v 2.0                    # the version 2.0 face
 
-Two faces ship: `default` (clockface.py) and `zelda` (zelda_clockface.py, traced
-from the mockups in zelda/). Pick one with --face; each applies its own colours
-and clock format, and the shared design flags override either. Each also sets its
-own repaint rate -- the Zelda bar steps every 1.875s, so that face is redrawn on
-a 1.875s grid rather than once a second.
+Two faces ship: `default` (clockface.py) and `2.0` (the version 2.0 face in
+zelda_clockface.py). Pick one with --v; each applies its own colours and clock
+format, and the shared design flags override either. Each also sets its own
+repaint rate -- the version 2.0 bar steps every 1.875s, so that face is redrawn
+on a 1.875s grid rather than once a second.
 
 It survives the panel going away. Unplug it, walk out of range, or let the phone
 app steal the link, and this drops into a reconnect loop -- every 5 seconds,
@@ -51,7 +51,7 @@ from bleak.exc import BleakError
 from PIL import Image
 
 import clockface
-import zelda_clockface
+import zelda_clockface as v2_clockface
 from clockface import HEIGHT, WIDTH, parse_color
 from ipixel_clock import (
     ACK_ACCEPTED,
@@ -65,7 +65,7 @@ from ipixel_clock import (
 # Each face is a module exposing the same seam: build_settings, render,
 # tick_seconds, preview_moments, validation_moments, preview_sheet. Adding a
 # face means adding a module here, not editing the driver.
-FACES = {"default": clockface, "zelda": zelda_clockface}
+FACES = {"default": clockface, "2.0": v2_clockface}
 
 # Slot 0 is "show now, do not store". It costs no EEPROM write cycles, cannot
 # leave a half-written slot behind, and cannot brick the panel with bad content
@@ -208,7 +208,7 @@ async def _stream(
     frames = 0
     failures = 0
     # Align the repaint grid to the wall clock rather than to whenever the
-    # connection happened to open. The Zelda bar steps every 60/32 seconds, and
+    # connection happened to open. The version 2.0 bar steps every 60/32 seconds, and
     # 60 is a whole number of those steps, so multiples of the interval since
     # the epoch land on both the step boundaries and the minute -- meaning a
     # pixel appears when it is due instead of up to a full interval late.
@@ -385,14 +385,14 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     p.add_argument(
-        "--face",
+        "--v",
         choices=sorted(FACES),
         default="default",
-        help="which face to draw: 'default' or the Zelda design from zelda/*.png",
+        help="which face version to draw: 'default' or the version 2.0 face",
     )
 
     # Colour and tri-state flags default to None so each face can supply its own
-    # look. Hard-coding one face's defaults here would mean `--face zelda`
+    # look. Hard-coding one face's defaults here would mean `--v 2.0`
     # silently inherited the other face's palette and 12-hour clock.
     design = p.add_argument_group("design (shared; each face applies its own defaults)")
     design.add_argument("--color", type=parse_color, help="digit colour [face default]")
@@ -424,7 +424,7 @@ def build_parser() -> argparse.ArgumentParser:
     design.add_argument("--date-every", type=int, default=20, help="date cycle (default face)")
     design.add_argument("--date-for", type=int, default=5, help="date dwell (default face)")
     design.add_argument("--weekday-format", default="%a",
-                        help="strftime for the weekday shown beside the date [zelda]")
+                        help="strftime for the weekday shown beside the date [version 2.0]")
 
     run = p.add_argument_group("running")
     run.add_argument("--preview", type=Path, help="write a contact sheet and exit")
@@ -452,7 +452,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
-    faces = FACES[args.face]
+    faces = FACES[args.v]
 
     try:
         face = faces.build_settings(args)
@@ -489,7 +489,7 @@ def main(argv=None) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 1
     print(
-        f"Face {args.face!r} renders to {len(sample)} bytes of PNG at "
+        f"Face {args.v!r} renders to {len(sample)} bytes of PNG at "
         f"{faces.WIDTH}x{faces.HEIGHT}."
     )
 

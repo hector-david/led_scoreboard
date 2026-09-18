@@ -1,6 +1,7 @@
 #include "Scoreboard.h"
 
 #include "Font.h"
+#include "BatteryScreen.h"
 
 
 // ============================================================
@@ -139,27 +140,16 @@ void Scoreboard::handleButton(int buttonNumber) {
 
 void Scoreboard::update() {
 
+  // Whatever was borrowing the panel is done now.
+  temporaryScreen = false;
+
   // Score variables -> 32x16 framebuffer
   render();
 
   // Optional debugging
   printFramebuffer();
 
-  // Framebuffer -> PNG
-  if (!png.encode(framebuffer)) {
-    Serial.println("Scoreboard update failed: PNG");
-    return;
-  }
-
-  // PNG -> LED 0x0002 packet
-  if (!packet.build(png.data(), png.size())) {
-    Serial.println("Scoreboard update failed: packet");
-    return;
-  }
-
-  // Packet -> physical LED
-  if (!display.sendImagePacket(packet.data(), packet.size())) {
-    Serial.println("Scoreboard update failed: BLE send");
+  if (!sendFrame()) {
     return;
   }
 
@@ -168,6 +158,75 @@ void Scoreboard::update() {
     team1Score,
     team2Score
   );
+}
+
+
+bool Scoreboard::sendFrame() {
+
+  // Framebuffer -> PNG
+  if (!png.encode(framebuffer)) {
+    Serial.println("Frame send failed: PNG");
+    return false;
+  }
+
+  // PNG -> LED 0x0002 packet
+  if (!packet.build(png.data(), png.size())) {
+    Serial.println("Frame send failed: packet");
+    return false;
+  }
+
+  // Packet -> physical LED
+  if (!display.sendImagePacket(packet.data(), packet.size())) {
+    Serial.println("Frame send failed: BLE send");
+    return false;
+  }
+
+  return true;
+}
+
+
+// ============================================================
+// TEMPORARY SCREENS
+// ============================================================
+
+void Scoreboard::showBattery(uint8_t percent) {
+
+  BatteryScreen::render(framebuffer, percent);
+
+  Serial.println();
+  Serial.printf("FRAMEBUFFER | BATTERY %u%%\n", percent);
+  framebuffer.print();
+
+  if (!sendFrame()) {
+    // Nothing reached the panel, so there is nothing to undo.
+    return;
+  }
+
+  Serial.printf(
+    "BATTERY DISPLAYED | %u%% | scores back in %lu ms\n",
+    percent,
+    BatteryScreen::SHOW_MS
+  );
+
+  temporaryScreen = true;
+  temporaryScreenEnd = millis() + BatteryScreen::SHOW_MS;
+}
+
+
+void Scoreboard::tick() {
+
+  if (!temporaryScreen) {
+    return;
+  }
+
+  if ((long)(millis() - temporaryScreenEnd) < 0) {
+    return;
+  }
+
+  Serial.println("Restoring scoreboard...");
+
+  // Clears temporaryScreen as a side effect.
+  update();
 }
 
 

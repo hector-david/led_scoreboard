@@ -92,6 +92,16 @@ void Framebuffer::print() const {
         Serial.print("B");
       }
 
+      // Green (battery OK)
+      else if (pixel.r == 0 && pixel.g > 0 && pixel.b == 0) {
+        Serial.print("G");
+      }
+
+      // Yellow (battery low)
+      else if (pixel.r > 0 && pixel.g > 0 && pixel.b == 0) {
+        Serial.print("Y");
+      }
+
       // Black
       else {
         Serial.print(".");

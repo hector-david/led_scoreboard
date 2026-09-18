@@ -55,6 +55,11 @@ public:
 
   bool isConnected() const;
 
+  // The underlying link, so other modules (RemoteBattery) can
+  // read non-HID services on the same connection. May be
+  // nullptr before the first connect().
+  BLEClient* getClient() const { return client; }
+
   void setButtonHandler(ButtonHandler handler);
 
   // Drains queued reports and resolves pending taps.

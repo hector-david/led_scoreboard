@@ -21,6 +21,7 @@
 #include "Config.h"
 #include "LedDisplay.h"
 #include "D18Remote.h"
+#include "RemoteBattery.h"
 #include "Scoreboard.h"
 
 // ============================================================
@@ -36,6 +37,7 @@
 //   - button_10 x2 -> reset both scores to 00 (double press)
 //   - button_8 -> brightness up
 //   - button_7 -> brightness down
+//   - button_3 -> show D18 battery level for a few seconds
 //
 // Automatic reconnection:
 //   Both links are checked every loop. Whichever one is down
@@ -51,6 +53,8 @@
 //   LedImagePacket    PNG -> panel 0x0002 packet
 //   LedDisplay        LED panel BLE client
 //   D18Remote         D18 remote BLE HID client + gestures
+//   RemoteBattery     D18 battery level over BLE Battery Service
+//   BatteryScreen     battery level -> framebuffer
 //   Scoreboard        scores + display pipeline
 // ============================================================
 
@@ -63,6 +67,8 @@ static LedDisplay ledDisplay;
 
 static D18Remote remote;
 
+static RemoteBattery remoteBattery(remote);
+
 static Scoreboard scoreboard(ledDisplay);
 
 
@@ -72,7 +78,31 @@ static Scoreboard scoreboard(ledDisplay);
 // Called by D18Remote::update() from loop().
 // ============================================================
 
+static const int BATTERY_BUTTON = 3;
+
+
+void showRemoteBattery() {
+
+  Serial.println("Reading D18 battery...");
+
+  uint8_t percent;
+
+  if (!remoteBattery.read(percent)) {
+    // Already logged why; leave the scores on the panel.
+    return;
+  }
+
+  scoreboard.showBattery(percent);
+}
+
+
 void onButton(int buttonNumber) {
+
+  if (buttonNumber == BATTERY_BUTTON) {
+    showRemoteBattery();
+    return;
+  }
+
   scoreboard.handleButton(buttonNumber);
 }
 
@@ -105,6 +135,7 @@ void printReadyBanner() {
   Serial.println("button_10 x2 = reset both to 00 (double press)");
   Serial.println("button_8 = brightness up");
   Serial.println("button_7 = brightness down");
+  Serial.println("button_3 = show D18 battery level");
   Serial.println("============================================");
   Serial.println();
 
@@ -284,6 +315,10 @@ void loop() {
 
   // Drain queued D18 reports and fire button handlers.
   remote.update();
+
+
+  // Put the scores back once a battery screen has timed out.
+  scoreboard.tick();
 
 
   // Reconnect whatever is down. Blocks for a scan when a

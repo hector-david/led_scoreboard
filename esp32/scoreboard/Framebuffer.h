@@ -21,6 +21,8 @@ namespace Colors {
   static const RGB BLACK = { 0, 0, 0 };
   static const RGB RED = { 255, 0, 0 };
   static const RGB BLUE = { 0, 0, 255 };
+  static const RGB GREEN = { 0, 255, 0 };
+  static const RGB YELLOW = { 255, 200, 0 };
 }
 
 

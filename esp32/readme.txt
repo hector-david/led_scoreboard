@@ -1,7 +1,13 @@
 Set:
-Tools > Flash Size: "16MB (128Mb)"
-
-
+Tools > Flash Size:
+Board:              ESP32S3 Dev Module
+Port:               COM7
+Upload Speed:       921600
+USB CDC On Boot:    Disabled
+CPU Frequency:      240MHz (WiFi)
+Flash Mode:         QIO 80MHz
+Flash Size:         16MB (128Mb)
+PSRAM:              OPI PSRAM
 
 Open:
 C:\Users\hecto\AppData\Local\Arduino15\packages\esp32\hardware\esp32\3.3.11\libraries\BLE\src\BLEClient.cpp
@@ -37,3 +43,7 @@ if (rc != 0) {
         rc, BLEUtils::returnCodeToString(rc));
   break;
 }
+
+
+Installed Library:
+PNGenc

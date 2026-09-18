@@ -78,6 +78,24 @@ void Scoreboard::handleButton(int buttonNumber) {
       break;
 
 
+    // Brightness only touches the panel setting; the scores
+    // and the displayed frame do not change, so return early
+    // instead of re-rendering.
+
+    case 8:
+
+      display.increaseBrightness();
+
+      return;
+
+
+    case 7:
+
+      display.decreaseBrightness();
+
+      return;
+
+
     default:
 
       // Other buttons do nothing yet.

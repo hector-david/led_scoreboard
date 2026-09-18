@@ -770,14 +770,20 @@ bool encodeFramebufferToPng() {
   //
   // 32 x 16
   // RGB888
-  // 8 bits/channel
   // compression level 6
+  //
+  // NOTE: PNGenc's 4th argument is bits per PIXEL,
+  // not bits per channel. It uses it to size each
+  // row ((width * bpp) / 8), so truecolor must be 24.
+  // Passing 8 makes it encode only the first third
+  // of every row, producing a PNG the panel cannot
+  // decode (it still ACKs the transfer).
   result =
     pngEncoder.encodeBegin(
       WIDTH,
       HEIGHT,
       PNG_PIXEL_TRUECOLOR,
-      8,
+      24,
       nullptr,
       6
     );

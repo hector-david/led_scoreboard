@@ -62,4 +62,9 @@ private:
   uint8_t team1Score = 0;
 
   uint8_t team2Score = 0;
+
+  // Double-press state for the button_10 reset.
+  bool resetArmed = false;
+
+  unsigned long resetArmedTime = 0;
 };

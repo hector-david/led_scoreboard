@@ -33,7 +33,7 @@
 //   - button_5 -> Team 1 -1
 //   - button_4 -> Team 2 +1
 //   - button_2 -> Team 2 -1
-//   - button_10 -> reset both scores to 00
+//   - button_10 x2 -> reset both scores to 00 (double press)
 //   - button_8 -> brightness up
 //   - button_7 -> brightness down
 //
@@ -102,7 +102,7 @@ void printReadyBanner() {
   Serial.println("button_5 = Team 1 -1");
   Serial.println("button_4 = Team 2 +1");
   Serial.println("button_2 = Team 2 -1");
-  Serial.println("button_10 = reset both to 00");
+  Serial.println("button_10 x2 = reset both to 00 (double press)");
   Serial.println("button_8 = brightness up");
   Serial.println("button_7 = brightness down");
   Serial.println("============================================");

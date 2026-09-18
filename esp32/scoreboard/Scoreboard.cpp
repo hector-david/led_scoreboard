@@ -20,6 +20,10 @@ static const RGB TEAM2_COLOR = Colors::BLUE;
 
 static const uint8_t MAX_SCORE = 99;
 
+// button_10 must be pressed twice within this window to reset
+// the scores, so a single accidental press does nothing.
+static const unsigned long RESET_DOUBLE_PRESS_MS = 800;
+
 
 Scoreboard::Scoreboard(LedDisplay& display)
   : display(display) {
@@ -70,12 +74,28 @@ void Scoreboard::handleButton(int buttonNumber) {
       break;
 
 
-    case 10:
+    case 10: {
+
+      unsigned long now = millis();
+
+      // First press only arms the reset. A second press inside
+      // the window completes it; a late press re-arms instead.
+      if (!resetArmed || (now - resetArmedTime > RESET_DOUBLE_PRESS_MS)) {
+        resetArmed = true;
+        resetArmedTime = now;
+
+        Serial.println("RESET ARMED | press button_10 again to reset");
+
+        return;
+      }
+
+      resetArmed = false;
 
       team1Score = 0;
       team2Score = 0;
 
       break;
+    }
 
 
     // Brightness only touches the panel setting; the scores

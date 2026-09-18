@@ -37,7 +37,7 @@ This is the ESP32 port of the Python scoreboard in the repo root
 | Swipe up | `button_5` | Team 1 −1 |
 | Swipe left | `button_4` | Team 2 +1 |
 | Swipe right | `button_2` | Team 2 −1 |
-| Consumer key `40 00` | `button_10` | Reset both scores to `00` |
+| Consumer key `40 00` | `button_10` | Double press: reset both scores to `00` |
 
 Scores are clamped to `0–99`. The remaining D18 inputs are decoded but not yet
 mapped to an action:
@@ -97,7 +97,7 @@ button_1 = Team 1 +1
 button_5 = Team 1 -1
 button_4 = Team 2 +1
 button_2 = Team 2 -1
-button_10 = reset both to 00
+button_10 x2 = reset both to 00 (double press)
 ============================================
 ```
 

@@ -33,6 +33,7 @@
 //   - button_5 -> Team 1 -1
 //   - button_4 -> Team 2 +1
 //   - button_2 -> Team 2 -1
+//   - button_10 -> reset both scores to 00
 //
 // This intentionally does NOT add automatic reconnection yet.
 // First we want to prove both BLE links can coexist reliably.
@@ -151,6 +152,7 @@ void setup() {
   Serial.println("button_5 = Team 1 -1");
   Serial.println("button_4 = Team 2 +1");
   Serial.println("button_2 = Team 2 -1");
+  Serial.println("button_10 = reset both to 00");
   Serial.println("============================================");
   Serial.println();
 

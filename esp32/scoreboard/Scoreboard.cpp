@@ -70,6 +70,14 @@ void Scoreboard::handleButton(int buttonNumber) {
       break;
 
 
+    case 10:
+
+      team1Score = 0;
+      team2Score = 0;
+
+      break;
+
+
     default:
 
       // Other buttons do nothing yet.

@@ -709,35 +709,35 @@ void printFramebuffer() {
 
 void updateScoreboard() {
 
-  // 1. Score variables -> RGB pixels
+  // Score variables -> 32x16 framebuffer
   renderScoreboard();
 
-
-  // Keep this for debugging for now.
+  // Optional debugging
   printFramebuffer();
 
-
-  // 2. RGB pixels -> PNG
-  if (
-    !encodeFramebufferToPng()
-  ) {
+  // Framebuffer -> PNG
+  if (!encodeFramebufferToPng()) {
+    Serial.println("Scoreboard update failed: PNG");
     return;
   }
 
-
-  printPngInfo();
-
-
-  // 3. PNG -> proprietary LED packet
-  if (
-    !buildLedImagePacket()
-  ) {
+  // PNG -> LED 0x0002 packet
+  if (!buildLedImagePacket()) {
+    Serial.println("Scoreboard update failed: packet");
     return;
   }
 
+  // Packet -> physical LED
+  if (!sendLedImagePacket()) {
+    Serial.println("Scoreboard update failed: BLE send");
+    return;
+  }
 
-  // 4. Send packet to physical LED
-  sendLedImagePacket();
+  Serial.printf(
+    "SCOREBOARD DISPLAYED | T1: %02u | T2: %02u\n",
+    team1Score,
+    team2Score
+  );
 }
 
 // ============================================================
@@ -2055,11 +2055,16 @@ void setup() {
 
   printConnectionStatus();
 
-  // renderScoreboard();
+  Serial.println(
+    "Sending initial scoreboard..."
+  );
 
-  delay(1000);
+  updateScoreboard();
 
-  testSolidRedFrame();
+  renderScoreboard();
+
+  // delay(1000);
+  // testSolidRedFrame();
 
   printFramebuffer();
 }

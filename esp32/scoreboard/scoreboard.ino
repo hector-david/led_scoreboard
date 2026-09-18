@@ -31,6 +31,8 @@
 //   - Stay connected to LED_BLE_CD9B89CA
 //   - button_1 -> Team 1 +1
 //   - button_5 -> Team 1 -1
+//   - button_4 -> Team 2 +1
+//   - button_2 -> Team 2 -1
 //
 // This intentionally does NOT add automatic reconnection yet.
 // First we want to prove both BLE links can coexist reliably.
@@ -147,6 +149,8 @@ void setup() {
   Serial.println("BOTH BLE DEVICES CONNECTED");
   Serial.println("button_1 = Team 1 +1");
   Serial.println("button_5 = Team 1 -1");
+  Serial.println("button_4 = Team 2 +1");
+  Serial.println("button_2 = Team 2 -1");
   Serial.println("============================================");
   Serial.println();
 

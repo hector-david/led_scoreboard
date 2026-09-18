@@ -40,14 +40,6 @@ void Scoreboard::handleButton(int buttonNumber) {
         team1Score++;
       }
 
-      Serial.printf(
-        "SCORE | Team 1: %u | Team 2: %u\n",
-        team1Score,
-        team2Score
-      );
-
-      update();
-
       break;
 
 
@@ -57,13 +49,23 @@ void Scoreboard::handleButton(int buttonNumber) {
         team1Score--;
       }
 
-      Serial.printf(
-        "SCORE | Team 1: %u | Team 2: %u\n",
-        team1Score,
-        team2Score
-      );
+      break;
 
-      update();
+
+    case 4:
+
+      if (team2Score < MAX_SCORE) {
+        team2Score++;
+      }
+
+      break;
+
+
+    case 2:
+
+      if (team2Score > 0) {
+        team2Score--;
+      }
 
       break;
 
@@ -72,8 +74,16 @@ void Scoreboard::handleButton(int buttonNumber) {
 
       // Other buttons do nothing yet.
 
-      break;
+      return;
   }
+
+  Serial.printf(
+    "SCORE | Team 1: %u | Team 2: %u\n",
+    team1Score,
+    team2Score
+  );
+
+  update();
 }
 
 

@@ -53,8 +53,17 @@ void Scoreboard::handleButton(int buttonNumber) {
 
     case 5:
 
-      // Team 2 comes next.
-      // Do nothing for now.
+      if (team1Score > 0) {
+        team1Score--;
+      }
+
+      Serial.printf(
+        "SCORE | Team 1: %u | Team 2: %u\n",
+        team1Score,
+        team2Score
+      );
+
+      update();
 
       break;
 

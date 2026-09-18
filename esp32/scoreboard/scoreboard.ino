@@ -30,6 +30,7 @@
 //   - Stay connected to D18 HID remote
 //   - Stay connected to LED_BLE_CD9B89CA
 //   - button_1 -> Team 1 +1
+//   - button_5 -> Team 1 -1
 //
 // This intentionally does NOT add automatic reconnection yet.
 // First we want to prove both BLE links can coexist reliably.
@@ -145,7 +146,7 @@ void setup() {
   Serial.println("============================================");
   Serial.println("BOTH BLE DEVICES CONNECTED");
   Serial.println("button_1 = Team 1 +1");
-  Serial.println("button_5 = not assigned yet");
+  Serial.println("button_5 = Team 1 -1");
   Serial.println("============================================");
   Serial.println();
 

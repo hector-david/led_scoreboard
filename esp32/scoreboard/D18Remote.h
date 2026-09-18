@@ -43,10 +43,15 @@ public:
   // Scan, connect, and secure the link.
   // Connect the D18 before anything else: it only advertises
   // for a short time after a button press.
+  // Safe to call again after the link drops.
   bool connect();
 
   // Discover HID INPUT reports and subscribe to them.
+  // Must be repeated after every (re)connect.
   bool subscribeHidReports();
+
+  // Drops the link so the next connect() starts clean.
+  void disconnect();
 
   bool isConnected() const;
 
@@ -120,8 +125,16 @@ private:
   void emitButton(int buttonNumber);
 
 
+  // The scan object is shared with LedDisplay, so this
+  // callback stays installed and ignores results unless
+  // connect() is actively looking for the D18.
+  ScanCallbacks scanCallbacks;
+
+  bool scanningForD18 = false;
+
   BLEAdvertisedDevice* target = nullptr;
 
+  // Created once and reused across reconnects.
   BLEClient* client = nullptr;
 
   // Maps characteristic handle -> HID Report ID

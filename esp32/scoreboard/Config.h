@@ -27,6 +27,14 @@ namespace Config {
   static const char* D18_NAME = "D18";
 
 
+  // ---- BLE ----------------------------------------------------
+
+  // Length of one scan attempt. Reconnection retries forever,
+  // so keep this short: while both devices are down the loop
+  // alternates between a D18 scan and an LED scan.
+  static const uint32_t BLE_SCAN_SECONDS = 5;
+
+
   // ---- Display geometry -------------------------------------
 
   static const int DISPLAY_WIDTH = 32;

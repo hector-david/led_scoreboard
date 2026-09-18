@@ -24,7 +24,7 @@
 #include "Scoreboard.h"
 
 // ============================================================
-// D18 + LED DUAL-CONNECTION TEST
+// D18 + LED SCOREBOARD
 //
 // Goal:
 //   - Stay connected to D18 HID remote
@@ -35,8 +35,11 @@
 //   - button_2 -> Team 2 -1
 //   - button_10 -> reset both scores to 00
 //
-// This intentionally does NOT add automatic reconnection yet.
-// First we want to prove both BLE links can coexist reliably.
+// Automatic reconnection:
+//   Both links are checked every loop. Whichever one is down
+//   gets a fresh scan + connect attempt, and failed attempts
+//   simply retry on the next pass, forever. The scores live
+//   in RAM, so after the LED comes back they are re-sent.
 //
 // Module layout:
 //   Config.h          shared names, geometry, buffer sizes
@@ -88,6 +91,141 @@ void printConnectionStatus() {
 }
 
 
+void printReadyBanner() {
+
+  Serial.println();
+  Serial.println("============================================");
+  Serial.println("BOTH BLE DEVICES CONNECTED");
+  Serial.println("button_1 = Team 1 +1");
+  Serial.println("button_5 = Team 1 -1");
+  Serial.println("button_4 = Team 2 +1");
+  Serial.println("button_2 = Team 2 -1");
+  Serial.println("button_10 = reset both to 00");
+  Serial.println("============================================");
+  Serial.println();
+
+  printConnectionStatus();
+}
+
+
+// ============================================================
+// CONNECTION MANAGEMENT
+//
+// Each attempt blocks for one scan (Config::BLE_SCAN_SECONDS)
+// plus the connect itself. That is acceptable: a device that
+// is down cannot send us anything, and D18 reports that
+// arrive while the LED is being reconnected just wait in the
+// HID queue until the next remote.update().
+// ============================================================
+
+// Short pause between failed rounds so the BLE stack gets a
+// moment to settle and the loop keeps servicing remote.update().
+static const unsigned long RETRY_DELAY_MS = 500;
+
+static bool d18WasConnected = false;
+
+static bool ledWasConnected = false;
+
+static unsigned long nextAttemptTime = 0;
+
+
+// Full D18 bring-up: scan, connect, secure, subscribe.
+bool connectRemote() {
+
+  if (!remote.connect()) {
+    return false;
+  }
+
+  if (!remote.subscribeHidReports()) {
+    // Connected but useless without reports; drop it so the
+    // next pass sees it as down and starts over.
+    remote.disconnect();
+    return false;
+  }
+
+  return true;
+}
+
+
+// Full LED bring-up: scan, connect, then restore panel state.
+bool connectDisplay() {
+
+  if (!ledDisplay.connect()) {
+    return false;
+  }
+
+  delay(300);
+
+  // Establish a known starting point.
+  // We cannot assume the panel's existing brightness matches
+  // our local variable, so explicitly set it to 50%.
+  ledDisplay.sendBrightness();
+
+  // Put the current scores back on the panel. On first boot
+  // this is the initial 00 - 00 frame.
+  Serial.println("Sending scoreboard...");
+
+  scoreboard.update();
+
+  return true;
+}
+
+
+void maintainConnections() {
+
+  bool d18Up = remote.isConnected();
+  bool ledUp = ledDisplay.isConnected();
+
+
+  // Announce drops once, not every pass.
+  if (d18WasConnected && !d18Up) {
+    Serial.println();
+    Serial.println("D18 DISCONNECTED. Press a button on the remote to reconnect.");
+  }
+
+  if (ledWasConnected && !ledUp) {
+    Serial.println();
+    Serial.println("LED DISCONNECTED. Reconnecting...");
+  }
+
+  d18WasConnected = d18Up;
+  ledWasConnected = ledUp;
+
+
+  if (d18Up && ledUp) {
+    return;
+  }
+
+  // Back off briefly after a failed round.
+  if ((long)(millis() - nextAttemptTime) < 0) {
+    return;
+  }
+
+
+  // D18 first: it only advertises for a short time after a
+  // button press, so give it the first scan of every round.
+  if (!d18Up) {
+    d18Up = connectRemote();
+    d18WasConnected = d18Up;
+  }
+
+  // The LED advertises continuously, so this succeeds as soon
+  // as the panel is powered and not held by the phone app.
+  if (!ledUp) {
+    ledUp = connectDisplay();
+    ledWasConnected = ledUp;
+  }
+
+
+  if (d18Up && ledUp) {
+    printReadyBanner();
+  }
+  else {
+    nextAttemptTime = millis() + RETRY_DELAY_MS;
+  }
+}
+
+
 // ============================================================
 // SETUP
 // ============================================================
@@ -99,11 +237,14 @@ void setup() {
   delay(2000);
 
   Serial.println();
-  Serial.println("=== D18 + LED DUAL BLE TEST ===");
+  Serial.println("=== D18 + LED SCOREBOARD ===");
 
 
   if (!remote.begin()) {
-    return;
+    // Without the HID queue nothing can work; stop here.
+    while (true) {
+      delay(1000);
+    }
   }
 
   remote.setButtonHandler(onButton);
@@ -120,56 +261,14 @@ void setup() {
   BLESecurity::setAuthenticationMode(true, false, false);
 
 
-  // 1) D18 first.
-  if (!remote.connect()) {
-    return;
-  }
-
-  // 2) Subscribe to its HID reports.
-  if (!remote.subscribeHidReports()) {
-    return;
-  }
-
-  // 3) While D18 stays connected, connect the LED.
-  if (!ledDisplay.connect()) {
-    return;
-  }
-
-
-  delay(300);
-
-
-  // Establish a known starting point.
-  // We cannot assume the panel's existing brightness matches
-  // our local variable, so explicitly set it to 50%.
-  ledDisplay.sendBrightness();
-
-
-  Serial.println();
-  Serial.println("============================================");
-  Serial.println("BOTH BLE DEVICES CONNECTED");
-  Serial.println("button_1 = Team 1 +1");
-  Serial.println("button_5 = Team 1 -1");
-  Serial.println("button_4 = Team 2 +1");
-  Serial.println("button_2 = Team 2 -1");
-  Serial.println("button_10 = reset both to 00");
-  Serial.println("============================================");
-  Serial.println();
-
   Serial.printf(
     "INITIAL SCORE | Team 1: %u | Team 2: %u\n",
     scoreboard.getTeam1Score(),
     scoreboard.getTeam2Score()
   );
 
-  printConnectionStatus();
-
-  Serial.println("Sending initial scoreboard...");
-
-  scoreboard.update();
-
-  // delay(1000);
-  // scoreboard.testSolidRedFrame();
+  // Connections are made (and remade) from loop().
+  Serial.println("Press a button on the D18 so the board can find it.");
 }
 
 
@@ -181,6 +280,11 @@ void loop() {
 
   // Drain queued D18 reports and fire button handlers.
   remote.update();
+
+
+  // Reconnect whatever is down. Blocks for a scan when a
+  // device is missing; returns immediately otherwise.
+  maintainConnections();
 
 
   // Print both connection states every 5 seconds.

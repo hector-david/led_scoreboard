@@ -22,7 +22,11 @@ public:
 
   // Scan, connect, negotiate MTU, resolve characteristics,
   // and subscribe to ACK notifications.
+  // Safe to call again after the link drops.
   bool connect();
+
+  // Drops the link so the next connect() starts clean.
+  void disconnect();
 
   bool isConnected() const;
 
@@ -50,8 +54,10 @@ private:
   );
 
 
+  // Created once and reused across reconnects.
   BLEClient* client = nullptr;
 
+  // Rediscovered on every connect(); stale after a drop.
   BLERemoteCharacteristic* writeChar = nullptr;
 
   BLERemoteCharacteristic* notifyChar = nullptr;

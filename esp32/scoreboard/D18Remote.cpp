@@ -39,7 +39,8 @@ static const int HID_QUEUE_LENGTH = 32;
 D18Remote* D18Remote::instance = nullptr;
 
 
-D18Remote::D18Remote() {
+D18Remote::D18Remote()
+  : scanCallbacks(*this) {
   instance = this;
 }
 
@@ -71,11 +72,25 @@ bool D18Remote::isConnected() const {
 }
 
 
+void D18Remote::disconnect() {
+
+  if (client && client->isConnected()) {
+    client->disconnect();
+  }
+}
+
+
 // ============================================================
 // SCAN CALLBACK
 // ============================================================
 
 void D18Remote::ScanCallbacks::onResult(BLEAdvertisedDevice device) {
+
+  // Ignore results from LED scans, and any late result that
+  // arrives after we already picked a target.
+  if (!owner.scanningForD18 || owner.target) {
+    return;
+  }
 
   if (!device.haveName()) {
     return;
@@ -108,7 +123,8 @@ bool D18Remote::connect() {
 
   BLEScan* scan = BLEDevice::getScan();
 
-  scan->setAdvertisedDeviceCallbacks(new ScanCallbacks(*this));
+  // Same object every time; re-installing it is harmless.
+  scan->setAdvertisedDeviceCallbacks(&scanCallbacks);
 
   scan->setActiveScan(true);
   scan->setInterval(100);
@@ -116,13 +132,16 @@ bool D18Remote::connect() {
 
   target = nullptr;
 
-  Serial.println("Put D18 in pairing/advertising mode.");
-  Serial.println("Scanning for D18...");
+  Serial.println("Scanning for D18... (press a button on the remote)");
 
-  scan->start(10, false);
+  scanningForD18 = true;
+
+  scan->start(Config::BLE_SCAN_SECONDS, false);
+
+  scanningForD18 = false;
 
   if (!target) {
-    Serial.println("ERROR: D18 not found.");
+    Serial.println("D18 not found.");
     return false;
   }
 
@@ -130,7 +149,9 @@ bool D18Remote::connect() {
 
   delay(50);
 
-  client = BLEDevice::createClient();
+  if (!client) {
+    client = BLEDevice::createClient();
+  }
 
   Serial.println("Connecting to D18...");
 
@@ -151,6 +172,7 @@ bool D18Remote::connect() {
 
   if (!client->secureConnection()) {
     Serial.println("ERROR: D18 security failed.");
+    disconnect();
     return false;
   }
 
@@ -166,10 +188,15 @@ bool D18Remote::connect() {
 
 bool D18Remote::subscribeHidReports() {
 
-  if (!client) {
+  if (!isConnected()) {
     Serial.println("ERROR: D18 not connected.");
     return false;
   }
+
+  // Handles are rediscovered on every connection, so drop
+  // the map from the previous link. No notifications can
+  // arrive while we rebuild it: nothing is subscribed yet.
+  reportIdByHandle.clear();
 
   BLERemoteService* hid = client->getService(HID_SERVICE_UUID);
 

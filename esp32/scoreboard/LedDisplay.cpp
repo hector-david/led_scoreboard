@@ -17,10 +17,16 @@ static BLEUUID LED_NOTIFY_UUID("0000fa03-0000-1000-8000-00805f9b34fb");
 // ============================================================
 // CONNECT
 //
-// This scan happens while the D18 remains connected.
+// Normally runs while the D18 remains connected. The scan
+// object is shared with D18Remote; its callback ignores
+// results unless D18Remote is the one scanning.
 // ============================================================
 
 bool LedDisplay::connect() {
+
+  // Anything left from a previous link is invalid now.
+  writeChar = nullptr;
+  notifyChar = nullptr;
 
   BLEScan* scan = BLEDevice::getScan();
 
@@ -29,10 +35,9 @@ bool LedDisplay::connect() {
   scan->setWindow(99);
 
   Serial.println();
-  Serial.println("D18 should still be connected.");
-  Serial.println("Scanning for LED while D18 stays connected...");
+  Serial.println("Scanning for LED...");
 
-  BLEScanResults* results = scan->start(10, false);
+  BLEScanResults* results = scan->start(Config::BLE_SCAN_SECONDS, false);
 
   BLEAdvertisedDevice* target = nullptr;
 
@@ -47,7 +52,7 @@ bool LedDisplay::connect() {
   }
 
   if (!target) {
-    Serial.println("ERROR: LED not found.");
+    Serial.println("LED not found.");
     scan->clearResults();
     return false;
   }
@@ -58,7 +63,9 @@ bool LedDisplay::connect() {
 
   delay(50);
 
-  client = BLEDevice::createClient();
+  if (!client) {
+    client = BLEDevice::createClient();
+  }
 
   Serial.println("Connecting to LED...");
 
@@ -89,8 +96,12 @@ bool LedDisplay::connect() {
 
   BLERemoteService* service = client->getService(LED_SERVICE_UUID);
 
+  // From here on a failure leaves a half-usable link, so
+  // drop it: isConnected() must only be true when the
+  // characteristics are ready.
   if (!service) {
     Serial.println("ERROR: LED FA service not found.");
+    disconnect();
     return false;
   }
 
@@ -99,6 +110,7 @@ bool LedDisplay::connect() {
 
   if (!writeChar || !notifyChar) {
     Serial.println("ERROR: LED characteristics missing.");
+    disconnect();
     return false;
   }
 
@@ -107,12 +119,24 @@ bool LedDisplay::connect() {
 
   if (!notifyChar->canNotify()) {
     Serial.println("ERROR: LED FA03 does not support notify.");
+    disconnect();
     return false;
   }
 
   notifyChar->registerForNotify(notifyCallback);
 
   return true;
+}
+
+
+void LedDisplay::disconnect() {
+
+  writeChar = nullptr;
+  notifyChar = nullptr;
+
+  if (client && client->isConnected()) {
+    client->disconnect();
+  }
 }
 
 

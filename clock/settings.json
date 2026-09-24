@@ -1,0 +1,22 @@
+{
+  "_readme": [
+    "Which LED panel the clock tools talk to. Change 'name' to point them at a",
+    "different panel -- that is the BLE advertised name, the one a scan shows,",
+    "and the only field used to connect. 'address' and 'note' are for reference.",
+    "JSON has no comments, so anything worth writing down goes in 'note'.",
+    "Overrides, highest first: --name on the command line, the LED_BLE_NAME",
+    "environment variable, then this file.",
+    "Run 'py device_settings.py' to see what this file currently resolves to.",
+    "Geometry is still fixed at 32x16 in code; this file only picks the device."
+  ],
+
+  "device": "clock",
+
+  "devices": {
+    "clock": {
+      "name": "LED_BLE_CD9B89CA",
+      "address": "96:84:CD:9B:89:CA",
+      "note": "the 32x16 panel every script in this repo was proven on"
+    }
+  }
+}

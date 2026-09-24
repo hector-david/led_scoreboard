@@ -11,6 +11,8 @@ That is the whole point, and it is a firmware feature, not a trick.
 
 | File | What it does |
 | --- | --- |
+| `settings.json` | **Which panel to talk to.** Edit this to point at another one. |
+| `device_settings.py` | Reads `settings.json`; `py device_settings.py` shows the answer. |
 | `ipixel_clock.py` | The two clock commands, the device-info reply, `ClockPanel`. |
 | `send_clock.py` | **Send once, forget.** Sets the time and picks the face. |
 | `clockface.py` | The default custom face — 32×16 image, no BLE. |
@@ -115,6 +117,50 @@ schtasks /create /tn "LED clock sync" /tr "py C:\Users\hecto\OneDrive\Documents\
 
 Check it first with `py send_clock.py --yes --style 3` — the task inherits
 whatever that does, including the confirmation prompt if you leave off `--yes`.
+
+## Which panel
+
+`settings.json` names the panel. It is the only place a device is named, and
+changing it is the whole procedure for pointing the clock somewhere else:
+
+```json
+{
+  "device": "clock",
+  "devices": {
+    "clock": {"name": "LED_BLE_CD9B89CA", "address": "96:84:CD:9B:89:CA"}
+  }
+}
+```
+
+Change `name` to another panel's advertised name and both `send_clock.py` and
+`custom_clock.py` follow. `py device_settings.py` prints what the file currently
+resolves to — worth a glance before blaming the radio.
+
+Only `name` is used to connect. Every script here finds the panel by scanning for
+its advertised name, because a BLE address on Windows is a per-machine identifier
+and the name is not; `address` and `note` are for your own records.
+
+More than one panel is supported but not set up: add a second entry under
+`devices` and point `device` at its key. With a single entry `device` is
+redundant, and with several it is required — you get told which keys exist rather
+than a silent pick.
+
+For one run, or for a scheduled task that should not depend on the file:
+
+```powershell
+py send_clock.py --name LED_BLE_E1D5E5B2   # --name wins over everything
+$env:LED_BLE_NAME = "LED_BLE_E1D5E5B2"     # a name, for this shell
+$env:LED_BLE_DEVICE = "spare"              # an entry key, if you add entries
+```
+
+Two caveats. **Geometry is compiled in at 32×16** — `settings.json` picks a
+device, not a panel size, so a panel of another size would get its clock set and
+the wrong shape drawn. And the scripts in `../src` and `../gif` still carry their
+own `LED_NAME` constant; this file covers the clock tools only.
+
+If `settings.json` is deleted the tools fall back to the built-in name and keep
+working. If it is there but malformed they stop and say so, because the
+alternative is connecting to the wrong panel and calling it a radio problem.
 
 ## Picking a face
 
@@ -288,7 +334,8 @@ dict. `test_clock.py` asserts every registered face implements the whole seam.
 ## Troubleshooting
 
 - **Not found** — the panel is asleep, out of range, or still held by the iPixel
-  phone app. Only one BLE central can hold the link; close the app.
+  phone app. Only one BLE central can hold the link; close the app. If it is the
+  wrong name being scanned for, `py device_settings.py` shows which one and why.
 - **Acknowledged but the face did not change** — try another style. Which of 0–9
   a given panel renders is not fixed; `--walk-styles` will tell you.
 - **Time is right, date is wrong (or vice versa)** — they travel in different

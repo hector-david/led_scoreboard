@@ -34,6 +34,7 @@ from typing import List, Optional, Tuple
 
 from bleak.exc import BleakError
 
+import device_settings
 from ipixel_clock import (
     ACK_ACCEPTED,
     DOCUMENTED_STYLE_MAX,
@@ -267,10 +268,21 @@ def main(argv=None) -> int:
         help="quarter turns: 0, 1=90, 2=180, 3=270 degrees",
     )
     p.add_argument("--at", type=parse_when, help="send this time instead of now (for testing)")
-    p.add_argument("--name", help="override the BLE name to scan for")
+    p.add_argument(
+        "--name", help="override the BLE name from settings.json for this run only"
+    )
     p.add_argument("--dry-run", action="store_true", help="build and print packets, no BLE")
     p.add_argument("--yes", action="store_true", help="skip the confirmation prompt")
     args = p.parse_args(argv)
+
+    # Which panel, decided before anything is built: a settings.json typo should
+    # look like a settings.json typo, not like a panel that would not answer.
+    try:
+        panel_name = device_settings.device_name(args.name)
+        panel_line = device_settings.describe(args.name)
+    except device_settings.SettingsError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
 
     settings = ClockSettings(style=args.style, h24=args.h24, show_date=args.date)
     when = args.at or datetime.now()
@@ -284,7 +296,8 @@ def main(argv=None) -> int:
         print("\nRefusing to send.", file=sys.stderr)
         return 1
 
-    print(f"\n{settings.summary()}, clock set to {when:%Y-%m-%d %H:%M:%S} ({when:%A}):")
+    print(f"\n{panel_line}")
+    print(f"{settings.summary()}, clock set to {when:%Y-%m-%d %H:%M:%S} ({when:%A}):")
     print(f"  set time   {set_time_cmd(when).hex(' ')}")
     print(
         "  clock mode "
@@ -321,7 +334,7 @@ def main(argv=None) -> int:
             run(
                 settings,
                 args.at,
-                name=args.name,
+                name=panel_name,
                 brightness=args.brightness,
                 rotate=args.rotate,
                 walk=args.walk_styles,

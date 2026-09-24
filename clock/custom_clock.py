@@ -51,6 +51,7 @@ from bleak.exc import BleakError
 from PIL import Image
 
 import clockface
+import device_settings
 import zelda_clockface as v2_clockface
 from clockface import HEIGHT, WIDTH, parse_color
 from ipixel_clock import (
@@ -438,7 +439,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run.add_argument("--slot", type=int, default=LIVE_SLOT, help="0 = show now, do not store")
     run.add_argument("--brightness", type=int, help="set brightness first (0-100)")
-    run.add_argument("--name", help="override the BLE name to scan for")
+    run.add_argument(
+        "--name", help="override the BLE name from settings.json for this run only"
+    )
     run.add_argument(
         "--no-handback",
         action="store_true",
@@ -453,6 +456,15 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
     faces = FACES[args.v]
+
+    # Which panel, decided before anything is rendered: a settings.json typo
+    # should look like a settings.json typo, not like a panel that never answers.
+    try:
+        panel_name = device_settings.device_name(args.name)
+        panel_line = device_settings.describe(args.name)
+    except device_settings.SettingsError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
 
     try:
         face = faces.build_settings(args)
@@ -523,6 +535,7 @@ def main(argv=None) -> int:
     fallback = ClockSettings(
         style=args.handback_style, h24=face.h24, show_date=face.show_date
     )
+    print(panel_line)
     print("Close the iPixel phone app first -- only one BLE central can hold the link.")
 
     try:
@@ -531,7 +544,7 @@ def main(argv=None) -> int:
                 face,
                 fallback,
                 faces=faces,
-                name=args.name,
+                name=panel_name,
                 slot=args.slot,
                 brightness=args.brightness,
                 duration=args.duration,

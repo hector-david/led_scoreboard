@@ -58,11 +58,17 @@ void Framebuffer::drawDigit(int digit, int startX, int startY, RGB color) {
     return;
   }
 
+  drawGlyph(Font::DIGITS[digit], startX, startY, color);
+}
+
+
+void Framebuffer::drawGlyph(const char* const* rows, int startX, int startY, RGB color) {
+
   for (int row = 0; row < Font::DIGIT_H; row++) {
 
     for (int col = 0; col < Font::DIGIT_W; col++) {
 
-      if (Font::DIGITS[digit][row][col] != '1') {
+      if (rows[row][col] != '1') {
         continue;
       }
 

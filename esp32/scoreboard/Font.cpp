@@ -184,4 +184,24 @@ namespace Font {
       ".11111."
     }
   };
+
+
+  // Percent sign: 2px diagonal with a 2x2 block at each end,
+  // same 2px stroke weight as the digits.
+  const char* const PERCENT[DIGIT_H] = {
+    ".....11",
+    "11...11",
+    "11..11.",
+    "....11.",
+    "...11..",
+    "...11..",
+    "..11...",
+    "..11...",
+    ".11....",
+    ".11....",
+    "11.....",
+    "11...11",
+    "1....11",
+    "......."
+  };
 }

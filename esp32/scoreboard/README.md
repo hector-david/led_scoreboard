@@ -138,14 +138,14 @@ The sketch is split into one class per file:
 | --- | --- |
 | `scoreboard.ino` | Wires the modules together; `setup()` connection sequence and `loop()` |
 | `Config.h` | Shared constants: device names, panel geometry, brightness range, buffer sizes |
-| `Font.h/.cpp` | 7×14 bitmap glyphs for digits `0`–`9` |
+| `Font.h/.cpp` | 7×14 bitmap glyphs for digits `0`–`9` and `%` |
 | `Framebuffer.h/.cpp` | 32×16 RGB888 pixel buffer with `clear`, `fill`, `setPixel`, `drawDigit`, and a serial dump |
 | `PngImage.h/.cpp` | Encodes a `Framebuffer` to an in-RAM PNG with PNGenc |
 | `LedImagePacket.h/.cpp` | Wraps a PNG in the panel's proprietary `0x0002` "show image" packet (length, CRC32, buffer number) |
 | `LedDisplay.h/.cpp` | BLE client for the LED panel: scan, connect, MTU, brightness, single-write image send, ACK notifications |
 | `D18Remote.h/.cpp` | BLE HID client for the D18: scan, connect, secure, subscribe to input reports, decode touchpad gestures and consumer keys into button numbers |
 | `RemoteBattery.h/.cpp` | Reads the D18 charge level over the standard BLE Battery Service (`0x180F` / `0x2A19`) on the existing D18 link |
-| `BatteryScreen.h/.cpp` | Draws a battery percentage centered on a `Framebuffer`, green / yellow / red by charge; sets how long it stays up (`SHOW_MS`) |
+| `BatteryScreen.h/.cpp` | Draws a battery percentage (digits + `%`) centered on a `Framebuffer`, green / yellow / red by charge; sets how long it stays up (`SHOW_MS`) |
 | `Scoreboard.h/.cpp` | Owns the two scores and the display pipeline; maps button numbers to score changes; hosts temporary screens (battery) and restores the scores when they expire |
 
 ### Display pipeline
@@ -198,7 +198,7 @@ Gesture thresholds live at the top of `D18Remote.cpp`.
 `button_3` reads the D18's Battery Level characteristic (one blocking GATT
 read on the main loop, a few tens of ms) and `Scoreboard::showBattery()` pushes
 the percentage through the same framebuffer → PNG → packet pipeline. The
-number is centered with no leading zeros and colored green (≥ 50 %), yellow
+number is followed by a `%` glyph, centered with no leading zeros, and colored green (≥ 50 %), yellow
 (20–49 %) or red (< 20 %). `Scoreboard::tick()`, called from `loop()`, re-sends
 the scores after `BatteryScreen::SHOW_MS` (3 s); any score change in the
 meantime restores them immediately. If the remote is disconnected or does not

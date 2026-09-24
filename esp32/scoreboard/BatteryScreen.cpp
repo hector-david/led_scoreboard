@@ -53,7 +53,11 @@ void BatteryScreen::render(Framebuffer& framebuffer, uint8_t percent) {
     value /= 10;
   } while (value > 0);
 
-  int width = count * Font::DIGIT_W + (count - 1) * DIGIT_GAP;
+  // Digits plus the trailing "%" glyph, each DIGIT_W wide with
+  // a gap between. "100%" is 31 px, so it just fits the panel.
+  int glyphs = count + 1;
+
+  int width = glyphs * Font::DIGIT_W + (glyphs - 1) * DIGIT_GAP;
 
   int x = (Config::DISPLAY_WIDTH - width) / 2;
 
@@ -65,4 +69,6 @@ void BatteryScreen::render(Framebuffer& framebuffer, uint8_t percent) {
 
     x += Font::DIGIT_W + DIGIT_GAP;
   }
+
+  framebuffer.drawGlyph(Font::PERCENT, x, DIGIT_Y, color);
 }

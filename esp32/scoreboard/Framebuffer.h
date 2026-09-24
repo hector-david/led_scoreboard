@@ -41,8 +41,11 @@ public:
 
   RGB getPixel(int x, int y) const;
 
-  // Draws one 7x14 glyph with its top-left corner at (startX, startY).
+  // Draws one 7x14 digit with its top-left corner at (startX, startY).
   void drawDigit(int digit, int startX, int startY, RGB color);
+
+  // Draws any 7x14 Font glyph (rows of '1' / '.') at (startX, startY).
+  void drawGlyph(const char* const* rows, int startX, int startY, RGB color);
 
   // Dumps the buffer to Serial as R / B / . characters.
   void print() const;

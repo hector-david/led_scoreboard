@@ -39,22 +39,37 @@ public:
 
   D18Remote();
 
-  // Creates the HID event queue. Call once before connect().
+  // Creates the HID event queue. Call once before scanning.
   bool begin();
 
-  // Scan, connect, and secure the link.
-  // Connect the D18 before anything else: it only advertises
-  // for a short time after a button press.
-  // Safe to call again after the link drops.
-  // scanSeconds blocks the caller, so pass a shorter slice when
-  // the loop has something to animate in the meantime.
-  bool connect(uint32_t scanSeconds = Config::BLE_SCAN_SECONDS);
+  // Starts looking for the remote, and returns immediately:
+  // the scan runs in the background so the loop can keep
+  // flashing the panel while it waits. A no-op while a scan
+  // is already running, so it is safe to call every pass.
+  // The scan is short and restarted rather than endless, so a
+  // remote that appears late is still picked up.
+  void startScan();
+
+  // True once a scan has seen the remote. The scan stops
+  // itself at that point; call connectToFoundRemote() next.
+  bool foundRemote() const { return target != nullptr; }
+
+  // Second half of the bring-up: connect to what the scan
+  // found and secure the link. Blocks, but only once the
+  // remote is actually there. Subscribe to HID reports after
+  // this. False leaves nothing connected.
+  bool connectToFoundRemote();
+
+  // Stops any running scan and forgets what it found. Call
+  // before anything else needs the radio to itself - an LED
+  // reconnect scans on the same shared scan object.
+  void cancelScan();
 
   // Discover HID INPUT reports and subscribe to them.
   // Must be repeated after every (re)connect.
   bool subscribeHidReports();
 
-  // Drops the link so the next connect() starts clean.
+  // Drops the link so the next bring-up starts clean.
   void disconnect();
 
   bool isConnected() const;
@@ -89,6 +104,15 @@ private:
     int lastX = 0;
     int lastY = 0;
   };
+
+  // Stops the radio side of a scan, leaving any found target
+  // in place for connectToFoundRemote().
+  void stopScanning();
+
+  // Passed to the background scan; the library calls it when
+  // the scan ends, whether it timed out or was stopped.
+  static void scanComplete(BLEScanResults results);
+
 
   class ScanCallbacks : public BLEAdvertisedDeviceCallbacks {
 
@@ -140,6 +164,15 @@ private:
   ScanCallbacks scanCallbacks;
 
   bool scanningForD18 = false;
+
+  // A background scan is running. Static so the library's
+  // scan-complete callback, a plain function pointer, can
+  // clear it; there is only ever one remote.
+  static volatile bool scanRunning;
+
+  // Backstop for scanRunning in case the completion callback
+  // never arrives: after this the scan is assumed to be over.
+  unsigned long scanEndTime = 0;
 
   BLEAdvertisedDevice* target = nullptr;
 

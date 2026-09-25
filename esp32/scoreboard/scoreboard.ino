@@ -157,9 +157,14 @@ void printReadyBanner() {
 // that cannot reach the panel does not go looking for the D18
 // at all.
 //
-// Each attempt blocks for one scan (Config::BLE_SCAN_SECONDS)
-// plus the connect itself. That is acceptable: a device that
-// is down cannot send us anything, and D18 reports that
+// An LED attempt blocks for one scan plus the connect itself.
+// That is acceptable: without the panel there is nothing to
+// show and nothing to keep smooth.
+//
+// The D18 is different. It is only ever looked for while the
+// panel is up and flashing, and a blocking scan would stall
+// that flash for its whole length, so the remote is scanned
+// for in the background and loop() keeps running. Reports that
 // arrive while the LED is being reconnected just wait in the
 // HID queue until the next remote.update().
 // ============================================================
@@ -174,18 +179,30 @@ static bool ledWasConnected = false;
 
 static unsigned long nextAttemptTime = 0;
 
+static unsigned long nextRemoteScanTime = 0;
 
-// Full D18 bring-up: scan, connect, secure, subscribe.
-bool connectRemote() {
 
-  // A scan blocks the loop, so while the panel is blinking for
-  // the missing remote we scan in short slices: each one gives
-  // scoreboard.tick() a chance to advance the blink.
-  uint32_t scanSeconds = scoreboard.isBlinking()
-    ? Config::BLE_SCAN_SECONDS_SHORT
-    : Config::BLE_SCAN_SECONDS;
+// Drives the background D18 scan. Returns immediately unless
+// the remote has actually been found, in which case it blocks
+// for the connect and comes back with a usable link.
+bool serviceRemoteScan() {
 
-  if (!remote.connect(scanSeconds)) {
+  if (!remote.foundRemote()) {
+
+    // Keep a scan running. startScan() is a no-op while one is
+    // already going, so this can be called every pass.
+    if ((long)(millis() - nextRemoteScanTime) >= 0) {
+      remote.startScan();
+    }
+
+    return false;
+  }
+
+
+  if (!remote.connectToFoundRemote()) {
+    // Back off before looking again, so a remote that keeps
+    // refusing the connect cannot spin the loop.
+    nextRemoteScanTime = millis() + RETRY_DELAY_MS;
     return false;
   }
 
@@ -193,6 +210,7 @@ bool connectRemote() {
     // Connected but useless without reports; drop it so the
     // next pass sees it as down and starts over.
     remote.disconnect();
+    nextRemoteScanTime = millis() + RETRY_DELAY_MS;
     return false;
   }
 
@@ -256,50 +274,58 @@ void maintainConnections() {
     return;
   }
 
-  // Back off briefly after a failed round.
-  if ((long)(millis() - nextAttemptTime) < 0) {
-    return;
-  }
-
 
   // The panel comes first. It advertises continuously, so this
   // succeeds as soon as it is powered and not held by the phone
   // app, and until it is up there is nowhere to show anything -
   // not even the blink that asks for a button press.
   if (!ledUp) {
+
+    // The LED connect scans on the same shared scan object, so
+    // a background D18 scan has to be out of the way first.
+    remote.cancelScan();
+
+    // Back off briefly after a failed round.
+    if ((long)(millis() - nextAttemptTime) < 0) {
+      return;
+    }
+
     ledUp = connectDisplay();
     ledWasConnected = ledUp;
-  }
 
-  // Still no panel: spend the next round on it again instead of
-  // pairing a remote we could not display anything for.
-  if (!ledUp) {
-    nextAttemptTime = millis() + RETRY_DELAY_MS;
-    return;
+    // Still no panel: spend the next round on it again instead
+    // of pairing a remote we could not display anything for.
+    if (!ledUp) {
+      nextAttemptTime = millis() + RETRY_DELAY_MS;
+      return;
+    }
   }
 
 
   // Blink from here on, so the panel is already asking for a
-  // button press while the D18 scan below is running.
+  // button press while the background scan looks for the D18.
   scoreboard.setBlinking(!d18Up);
 
   if (!d18Up) {
-    d18Up = connectRemote();
+    d18Up = serviceRemoteScan();
     d18WasConnected = d18Up;
   }
 
+  if (!d18Up) {
+    // Nothing found yet. Straight back to the loop, which has a
+    // flash to keep going.
+    return;
+  }
+
   // Stop the blink the moment the remote answers. Re-check the
-  // panel: it may have dropped during the scan above.
+  // panel: it may have dropped during the connect above.
   scoreboard.setBlinking(ledDisplay.isConnected() && !d18Up);
 
 
   // The banner claims both links, so make sure the panel really
-  // survived the scan.
-  if (d18Up && ledDisplay.isConnected()) {
+  // survived the connect.
+  if (ledDisplay.isConnected()) {
     printReadyBanner();
-  }
-  else {
-    nextAttemptTime = millis() + RETRY_DELAY_MS;
   }
 }
 

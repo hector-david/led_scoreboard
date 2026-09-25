@@ -117,10 +117,36 @@ void D18Remote::ScanCallbacks::onResult(BLEAdvertisedDevice device) {
 
 
 // ============================================================
-// CONNECT
+// SCANNING
+//
+// The scan runs in the background. A blocking scan would
+// freeze loop() for its whole length, and the panel flashes
+// from there while the remote is missing - the flash would
+// stall for a second at a time.
 // ============================================================
 
-bool D18Remote::connect(uint32_t scanSeconds) {
+volatile bool D18Remote::scanRunning = false;
+
+
+void D18Remote::scanComplete(BLEScanResults results) {
+  scanRunning = false;
+}
+
+
+void D18Remote::startScan() {
+
+  // The library clears scanRunning through scanComplete(), but
+  // do not depend on that callback arriving: a scan that is
+  // past due is treated as finished so a new one can start.
+  if (scanRunning && (long)(millis() - scanEndTime) >= 0) {
+    stopScanning();
+  }
+
+  // The scan stops itself once ScanCallbacks has a target, so
+  // an unconsumed one means there is nothing to look for.
+  if (scanRunning || target) {
+    return;
+  }
 
   BLEScan* scan = BLEDevice::getScan();
 
@@ -128,8 +154,13 @@ bool D18Remote::connect(uint32_t scanSeconds) {
   scan->setAdvertisedDeviceCallbacks(&scanCallbacks);
 
   scan->setActiveScan(true);
+
+  // Leave the radio to the LED connection most of the time.
+  // A blocking scan could take the whole window (100/99); this
+  // one runs alongside the panel's image writes, and starving
+  // those makes the panel drop frames.
   scan->setInterval(100);
-  scan->setWindow(99);
+  scan->setWindow(30);
 
   target = nullptr;
 
@@ -137,16 +168,55 @@ bool D18Remote::connect(uint32_t scanSeconds) {
 
   scanningForD18 = true;
 
-  scan->start(scanSeconds, false);
+  if (!scan->start(Config::BLE_SCAN_SECONDS, scanComplete, false)) {
+    Serial.println("ERROR: D18 scan did not start.");
+    scanningForD18 = false;
+    return;
+  }
+
+  scanRunning = true;
+
+  scanEndTime = millis() + (Config::BLE_SCAN_SECONDS * 1000UL) + 1000UL;
+}
+
+
+void D18Remote::stopScanning() {
 
   scanningForD18 = false;
 
+  if (scanRunning) {
+    BLEDevice::getScan()->stop();
+    scanRunning = false;
+  }
+
+  BLEDevice::getScan()->clearResults();
+}
+
+
+void D18Remote::cancelScan() {
+
+  stopScanning();
+
+  if (target) {
+    delete target;
+    target = nullptr;
+  }
+}
+
+
+// ============================================================
+// CONNECT
+// ============================================================
+
+bool D18Remote::connectToFoundRemote() {
+
   if (!target) {
-    Serial.println("D18 not found.");
     return false;
   }
 
-  scan->clearResults();
+  // ScanCallbacks already asked the scan to stop; make sure it
+  // is really down before taking the radio for the connect.
+  stopScanning();
 
   delay(50);
 

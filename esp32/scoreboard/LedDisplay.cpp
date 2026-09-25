@@ -207,7 +207,7 @@ void LedDisplay::decreaseBrightness() {
 // IMAGE PACKET
 // ============================================================
 
-bool LedDisplay::sendImagePacket(const uint8_t* packet, size_t length) {
+bool LedDisplay::sendImagePacket(const uint8_t* packet, size_t length, bool quiet) {
 
   if (!isConnected() || !writeChar) {
     Serial.println("SEND ERROR: LED is not connected.");
@@ -218,11 +218,13 @@ bool LedDisplay::sendImagePacket(const uint8_t* packet, size_t length) {
 
   size_t maxWritePayload = mtu > 3 ? mtu - 3 : 0;
 
-  Serial.printf(
-    "Sending scoreboard | packet: %u bytes | MTU payload: %u bytes\n",
-    (unsigned int)length,
-    (unsigned int)maxWritePayload
-  );
+  if (!quiet) {
+    Serial.printf(
+      "Sending scoreboard | packet: %u bytes | MTU payload: %u bytes\n",
+      (unsigned int)length,
+      (unsigned int)maxWritePayload
+    );
+  }
 
   // Important:
   // Do NOT allow the BLE library to silently turn
@@ -239,7 +241,9 @@ bool LedDisplay::sendImagePacket(const uint8_t* packet, size_t length) {
     true
   );
 
-  Serial.printf("LED image write: %s\n", ok ? "OK" : "FAILED");
+  if (!quiet || !ok) {
+    Serial.printf("LED image write: %s\n", ok ? "OK" : "FAILED");
+  }
 
   return ok;
 }

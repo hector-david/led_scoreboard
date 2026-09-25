@@ -91,7 +91,8 @@ The D18 is only scanned for once the panel is connected.
 
 The panel advertises continuously, so step 2 succeeds as soon as it is powered
 and free. The D18 only advertises for a short window after a button press,
-which is why it gets a fresh scan every round for as long as it is missing.
+which is why it is scanned for continuously - in the background, so the flash
+keeps its rhythm - for as long as it is missing.
 
 On success you will see:
 
@@ -118,22 +119,27 @@ STATUS | D18: CONNECTED | LED: CONNECTED | T1: 3 | T2: 1
 ## Automatic reconnection
 
 Both links are checked on every pass of `loop()`. If either one is down the
-board scans for it and tries to connect — the panel first (5 s per attempt,
-`Config::BLE_SCAN_SECONDS`), then the D18 in 1 s slices so the blink keeps
-moving; a failed attempt simply retries on the next pass, forever, so the board
-never needs a reset:
+board scans for it and tries to connect — the panel first (a blocking scan, 5 s
+per attempt, `Config::BLE_SCAN_SECONDS`), then the D18. A failed attempt simply
+retries on the next pass, forever, so the board never needs a reset:
 
 - **D18 drops** — the board prints `D18 DISCONNECTED. Press a button on the
-  remote to reconnect.` and keeps scanning. Press any button on the remote so
-  it advertises again; the link is re-secured from the stored bond and the HID
-  reports are re-subscribed.
+  remote to reconnect.` and keeps scanning. The D18 scan is the one scan that
+  does not block: `D18Remote::startScan()` starts it and returns, `loop()` goes
+  on flashing the panel, and `D18Remote::foundRemote()` reports when it has
+  something. Only then does the board block, for the connect itself
+  (`connectToFoundRemote()`). A scan that expires is simply restarted. Press
+  any button on the remote so it advertises again; the link is re-secured from
+  the stored bond and the HID reports are re-subscribed.
 - **LED drops** — the board prints `LED DISCONNECTED. Reconnecting...` and
   keeps scanning. As soon as the panel is back it re-sends the brightness and
   the current scores, which are kept in RAM the whole time. The blink stops
   while the panel is gone; there is nothing to blink on.
 - **Both down** — the panel is scanned for first, and a round that cannot reach
   it does not scan for the D18 at all: without a display there is nothing to
-  show and nothing to blink, so the next round goes back to the panel.
+  show and nothing to blink, so the next round goes back to the panel. Any
+  background D18 scan is cancelled before an LED attempt, because both share
+  one `BLEScan` object and the LED scan blocks.
 
 Scores are never lost by a disconnect; button presses that arrive while the
 LED is being reconnected are queued and applied once the loop resumes.
@@ -143,14 +149,28 @@ LED is being reconnected are queued and applied once the loop resumes.
 Whenever the panel is connected but the D18 is not — at startup and after the
 remote drops — the scores blink on and off so it is obvious from across the
 room that the board is not taking button presses yet. `Scoreboard::tick()`
-alternates the score frame with an empty one (`BLINK_MS`, top of
-`Scoreboard.cpp`), and `Scoreboard::setBlinking(false)` puts the scores back
-the moment the remote is connected.
+alternates the score frame with an empty one every `FLASH_MS` (300 ms, top of
+`Scoreboard.cpp`), and `Scoreboard::setBlinking(false)` stops the flashing the
+moment the remote is connected.
 
-A BLE scan blocks the loop, so while the panel is blinking the D18 is scanned
-for in short slices (`Config::BLE_SCAN_SECONDS_SHORT`, 1 s) instead of the
-usual 5 s; the blink can only advance between scans, so that slice, not
-`BLINK_MS`, sets the visible rate.
+`tickBlink()` neither blocks nor delays: it flips the frame when the current
+half is up and returns. That only works because nothing else in the loop
+blocks for long while the panel is flashing — this is why the D18 is scanned
+for in the background. A blocking scan froze the flash for its whole length,
+which is what an uneven, second-long blink was.
+
+**The panel sets the floor on the flash rate.** It drops an image write that
+arrives too soon after the one before it, ACKing on FA03 with a status of `00`
+instead of `03`, or not at all. 300 ms is comfortable; a 90 ms flash made it
+drop roughly every second frame, and because the drops landed on the lit half
+the panel sat black. If you shorten `FLASH_MS`, watch the ACK statuses on the
+serial monitor. A dropped frame now costs only one half of one flash — the
+next toggle is already on its way — instead of leaving the panel dark.
+
+Flash frames are built and sent with logging suppressed (the `quiet` argument
+on `LedImagePacket::build()` and `LedDisplay::sendImagePacket()`) - otherwise
+the packet dumps bury the rest of the log. Errors still log, and a failed
+write also ends the burst so the loop can go reconnect the panel.
 
 ## Module layout
 
@@ -247,7 +267,7 @@ expose the Battery Service the read is logged and the scores stay on the panel.
 | --- | --- | --- |
 | `LED_NAME` | `LED_BLE_CD9B89CA` | Panel advertised name |
 | `D18_NAME` | `D18` | Remote advertised name |
-| `BLE_SCAN_SECONDS` | `5` | Length of one scan attempt (initial connect and every reconnect retry) |
+| `BLE_SCAN_SECONDS` | `5` | Length of one scan attempt (a blocking LED scan, or one slice of the restarted background D18 scan) |
 | `BRIGHTNESS_DEFAULT` | `50` | Brightness sent at startup (%) |
 | `BRIGHTNESS_STEP` / `MIN` / `MAX` | `10` / `10` / `100` | Brightness adjustment range |
 | `DISPLAY_WIDTH` × `DISPLAY_HEIGHT` | `32` × `16` | Panel resolution |
@@ -279,7 +299,7 @@ Layout (digit positions, colors, gap) is at the top of `Scoreboard.cpp`.
   buffer number in `LedImagePacket.cpp`.
 - **Stuck on `Securing D18 connection...`** — `BLEClient::secureConnection()`
   waits for an encryption event with no timeout, so anything that stops the
-  pairing from finishing freezes the loop (and the blink) until the remote
+  pairing from finishing freezes the loop (and the flash) until the remote
   disconnects. `BLESecurity` tracks "security started" in a single global flag
   that is only cleared when a link drops, so an LED connect used to be able to
   claim it, after which the D18's pairing request was never sent and the wait

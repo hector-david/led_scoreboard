@@ -25,7 +25,10 @@ class LedImagePacket {
 public:
 
   // PNG -> packet. Returns false and logs on failure.
-  bool build(const uint8_t* png, size_t pngSize);
+  // quiet drops the per-packet dump, for the flash that
+  // signals a missing remote: it builds frames several times
+  // a second and would bury everything else in the log.
+  bool build(const uint8_t* png, size_t pngSize, bool quiet = false);
 
   const uint8_t* data() const { return buffer; }
 

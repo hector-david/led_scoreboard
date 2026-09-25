@@ -25,10 +25,17 @@ static const uint8_t MAX_SCORE = 99;
 // the scores, so a single accidental press does nothing.
 static const unsigned long RESET_DOUBLE_PRESS_MS = 800;
 
-// Minimum time each half of a blink stays on the panel. The
-// real rate is slower than this: tick() can only run between
-// the blocking BLE scans that look for the remote.
-static const unsigned long BLINK_MS = 400;
+// Half a flash of the "remote missing" signal: the scores are
+// lit for this long, then dark for this long. Nothing in the
+// loop blocks for anywhere near this - the remote is scanned
+// for in the background - so the rhythm stays even.
+//
+// Do not shorten this much without watching the panel. It
+// drops image writes that crowd the one before them, ACKing
+// on FA03 with a status of 00 instead of 03, or not at all.
+// A dropped frame here only costs one half of one flash: the
+// next toggle is already on its way.
+static const unsigned long FLASH_MS = 300;
 
 
 Scoreboard::Scoreboard(LedDisplay& display)
@@ -166,15 +173,15 @@ void Scoreboard::update() {
 }
 
 
-bool Scoreboard::sendBlank() {
+bool Scoreboard::sendBlank(bool quiet) {
 
   framebuffer.clear();
 
-  return sendFrame();
+  return sendFrame(quiet);
 }
 
 
-bool Scoreboard::sendFrame() {
+bool Scoreboard::sendFrame(bool quiet) {
 
   // Framebuffer -> PNG
   if (!png.encode(framebuffer)) {
@@ -183,13 +190,13 @@ bool Scoreboard::sendFrame() {
   }
 
   // PNG -> LED 0x0002 packet
-  if (!packet.build(png.data(), png.size())) {
+  if (!packet.build(png.data(), png.size(), quiet)) {
     Serial.println("Frame send failed: packet");
     return false;
   }
 
   // Packet -> physical LED
-  if (!display.sendImagePacket(packet.data(), packet.size())) {
+  if (!display.sendImagePacket(packet.data(), packet.size(), quiet)) {
     Serial.println("Frame send failed: BLE send");
     return false;
   }
@@ -218,13 +225,13 @@ void Scoreboard::setBlinking(bool blinking) {
     // Whatever was borrowing the panel loses it to the blink.
     temporaryScreen = false;
 
-    // Start dark, so the very first tick lights the scores up
-    // again and the blink is obvious right away.
-    blinkVisible = false;
+    // Start dark, so the flash is obvious right away instead
+    // of a lit panel that looks like nothing has changed.
+    flashLit = false;
 
-    blinkToggleTime = millis() + BLINK_MS;
+    flashToggleTime = millis() + FLASH_MS;
 
-    sendBlank();
+    sendBlank(true);
 
     return;
   }
@@ -244,23 +251,24 @@ void Scoreboard::setBlinking(bool blinking) {
 
 void Scoreboard::tickBlink() {
 
-  if ((long)(millis() - blinkToggleTime) < 0) {
+  if ((long)(millis() - flashToggleTime) < 0) {
     return;
   }
 
-  blinkToggleTime = millis() + BLINK_MS;
+  flashToggleTime = millis() + FLASH_MS;
 
-  blinkVisible = !blinkVisible;
+  flashLit = !flashLit;
 
-  // No framebuffer dump here: this runs a few times a second.
-  if (!blinkVisible) {
-    sendBlank();
+  // Sent quietly: this runs a few times a second and the
+  // packet dumps would bury the rest of the log.
+  if (!flashLit) {
+    sendBlank(true);
     return;
   }
 
   render();
 
-  sendFrame();
+  sendFrame(true);
 }
 
 

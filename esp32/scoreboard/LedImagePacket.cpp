@@ -6,7 +6,7 @@ using Config::LED_HEADER_SIZE;
 static const uint8_t BUFFER_NUMBER = 1;
 
 
-bool LedImagePacket::build(const uint8_t* png, size_t pngSize) {
+bool LedImagePacket::build(const uint8_t* png, size_t pngSize, bool quiet) {
 
   if (pngSize == 0) {
     Serial.println("PACKET ERROR: PNG size is zero.");
@@ -50,14 +50,16 @@ bool LedImagePacket::build(const uint8_t* png, size_t pngSize) {
   memcpy(&buffer[LED_HEADER_SIZE], png, pngSize);
 
 
-  Serial.printf(
-    "LED packet built | PNG: %u | CRC32: %08lX | total: %u\n",
-    (unsigned int)pngSize,
-    (unsigned long)crc,
-    (unsigned int)length
-  );
+  if (!quiet) {
+    Serial.printf(
+      "LED packet built | PNG: %u | CRC32: %08lX | total: %u\n",
+      (unsigned int)pngSize,
+      (unsigned long)crc,
+      (unsigned int)length
+    );
 
-  printHeader();
+    printHeader();
+  }
 
   return true;
 }

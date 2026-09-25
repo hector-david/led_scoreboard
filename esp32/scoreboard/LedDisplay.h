@@ -41,7 +41,10 @@ public:
 
   // Writes a fully built 0x0002 image packet in a single
   // GATT write. Refuses packets larger than the MTU payload.
-  bool sendImagePacket(const uint8_t* packet, size_t length);
+  // quiet drops the per-write logging: the flash that signals
+  // a missing remote sends frames several times a second and
+  // would otherwise bury everything else in the log.
+  bool sendImagePacket(const uint8_t* packet, size_t length, bool quiet = false);
 
 
 private:

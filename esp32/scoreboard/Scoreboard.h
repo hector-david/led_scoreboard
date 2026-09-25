@@ -71,13 +71,14 @@ private:
 
   // Framebuffer -> PNG -> packet -> LED. Shared by every
   // screen; the caller has already drawn the framebuffer.
-  bool sendFrame();
+  // quiet suppresses the per-frame logging, for the flash.
+  bool sendFrame(bool quiet = false);
 
-  // Pushes an empty frame: the dark half of a blink.
-  bool sendBlank();
+  // Pushes an empty frame: the dark half of a flash.
+  bool sendBlank(bool quiet = false);
 
-  // Sends the next blink frame if the current one has been up
-  // long enough.
+  // Flips the scores on or off once their half of the flash
+  // is up. Returns immediately otherwise.
   void tickBlink();
 
 
@@ -105,10 +106,10 @@ private:
   unsigned long temporaryScreenEnd = 0;
 
   // Blink state: while active the panel alternates between the
-  // scores and an empty frame.
+  // scores and an empty frame, every FLASH_MS.
   bool blinkActive = false;
 
-  bool blinkVisible = false;
+  bool flashLit = false;
 
-  unsigned long blinkToggleTime = 0;
+  unsigned long flashToggleTime = 0;
 };

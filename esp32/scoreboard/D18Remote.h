@@ -10,6 +10,8 @@
 
 #include <map>
 
+#include "Config.h"
+
 // ============================================================
 // D18 REMOTE
 //
@@ -44,7 +46,9 @@ public:
   // Connect the D18 before anything else: it only advertises
   // for a short time after a button press.
   // Safe to call again after the link drops.
-  bool connect();
+  // scanSeconds blocks the caller, so pass a shorter slice when
+  // the loop has something to animate in the meantime.
+  bool connect(uint32_t scanSeconds = Config::BLE_SCAN_SECONDS);
 
   // Discover HID INPUT reports and subscribe to them.
   // Must be repeated after every (re)connect.

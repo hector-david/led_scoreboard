@@ -119,7 +119,7 @@ void D18Remote::ScanCallbacks::onResult(BLEAdvertisedDevice device) {
 // CONNECT
 // ============================================================
 
-bool D18Remote::connect() {
+bool D18Remote::connect(uint32_t scanSeconds) {
 
   BLEScan* scan = BLEDevice::getScan();
 
@@ -136,7 +136,7 @@ bool D18Remote::connect() {
 
   scanningForD18 = true;
 
-  scan->start(Config::BLE_SCAN_SECONDS, false);
+  scan->start(scanSeconds, false);
 
   scanningForD18 = false;
 

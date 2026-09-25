@@ -25,6 +25,11 @@ static const uint8_t MAX_SCORE = 99;
 // the scores, so a single accidental press does nothing.
 static const unsigned long RESET_DOUBLE_PRESS_MS = 800;
 
+// Minimum time each half of a blink stays on the panel. The
+// real rate is slower than this: tick() can only run between
+// the blocking BLE scans that look for the remote.
+static const unsigned long BLINK_MS = 400;
+
 
 Scoreboard::Scoreboard(LedDisplay& display)
   : display(display) {
@@ -161,6 +166,14 @@ void Scoreboard::update() {
 }
 
 
+bool Scoreboard::sendBlank() {
+
+  framebuffer.clear();
+
+  return sendFrame();
+}
+
+
 bool Scoreboard::sendFrame() {
 
   // Framebuffer -> PNG
@@ -182,6 +195,72 @@ bool Scoreboard::sendFrame() {
   }
 
   return true;
+}
+
+
+// ============================================================
+// BLINKING (remote not connected)
+// ============================================================
+
+void Scoreboard::setBlinking(bool blinking) {
+
+  if (blinking == blinkActive) {
+    return;
+  }
+
+  blinkActive = blinking;
+
+
+  if (blinking) {
+
+    Serial.println("Remote missing: blinking the scoreboard.");
+
+    // Whatever was borrowing the panel loses it to the blink.
+    temporaryScreen = false;
+
+    // Start dark, so the very first tick lights the scores up
+    // again and the blink is obvious right away.
+    blinkVisible = false;
+
+    blinkToggleTime = millis() + BLINK_MS;
+
+    sendBlank();
+
+    return;
+  }
+
+
+  Serial.println("Remote connected: scoreboard back to normal.");
+
+  // Nothing to restore while the panel is down; connectDisplay()
+  // re-sends the scores when it comes back.
+  if (!display.isConnected()) {
+    return;
+  }
+
+  update();
+}
+
+
+void Scoreboard::tickBlink() {
+
+  if ((long)(millis() - blinkToggleTime) < 0) {
+    return;
+  }
+
+  blinkToggleTime = millis() + BLINK_MS;
+
+  blinkVisible = !blinkVisible;
+
+  // No framebuffer dump here: this runs a few times a second.
+  if (!blinkVisible) {
+    sendBlank();
+    return;
+  }
+
+  render();
+
+  sendFrame();
 }
 
 
@@ -214,6 +293,12 @@ void Scoreboard::showBattery(uint8_t percent) {
 
 
 void Scoreboard::tick() {
+
+  // The blink owns the panel while it is running.
+  if (blinkActive) {
+    tickBlink();
+    return;
+  }
 
   if (!temporaryScreen) {
     return;

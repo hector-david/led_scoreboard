@@ -45,6 +45,10 @@
 //   simply retry on the next pass, forever. The scores live
 //   in RAM, so after the LED comes back they are re-sent.
 //
+//   While the remote is missing the panel blinks the scores on
+//   and off; the display returns to normal as soon as the
+//   remote is connected.
+//
 // Module layout:
 //   Config.h          shared names, geometry, buffer sizes
 //   Font              7x14 digit glyphs
@@ -167,7 +171,14 @@ static unsigned long nextAttemptTime = 0;
 // Full D18 bring-up: scan, connect, secure, subscribe.
 bool connectRemote() {
 
-  if (!remote.connect()) {
+  // A scan blocks the loop, so while the panel is blinking for
+  // the missing remote we scan in short slices: each one gives
+  // scoreboard.tick() a chance to advance the blink.
+  uint32_t scanSeconds = scoreboard.isBlinking()
+    ? Config::BLE_SCAN_SECONDS_SHORT
+    : Config::BLE_SCAN_SECONDS;
+
+  if (!remote.connect(scanSeconds)) {
     return false;
   }
 
@@ -197,7 +208,9 @@ bool connectDisplay() {
   ledDisplay.sendBrightness();
 
   // Put the current scores back on the panel. On first boot
-  // this is the initial 00 - 00 frame.
+  // this is the initial 00 - 00 frame. If the remote is still
+  // missing, maintainConnections() turns this into a blink on
+  // the way out.
   Serial.println("Sending scoreboard...");
 
   scoreboard.update();
@@ -227,6 +240,11 @@ void maintainConnections() {
   ledWasConnected = ledUp;
 
 
+  // Blink the panel whenever the remote is missing. Needs the
+  // panel itself, so this stops on its own if the LED drops.
+  scoreboard.setBlinking(ledUp && !d18Up);
+
+
   if (d18Up && ledUp) {
     return;
   }
@@ -250,6 +268,11 @@ void maintainConnections() {
     ledUp = connectDisplay();
     ledWasConnected = ledUp;
   }
+
+
+  // Stop the blink the moment the remote answers, and start it
+  // if this round is the one that brought the panel back.
+  scoreboard.setBlinking(ledUp && !d18Up);
 
 
   if (d18Up && ledUp) {
@@ -317,7 +340,8 @@ void loop() {
   remote.update();
 
 
-  // Put the scores back once a battery screen has timed out.
+  // Advance the "remote missing" blink, or put the scores back
+  // once a battery screen has timed out.
   scoreboard.tick();
 
 

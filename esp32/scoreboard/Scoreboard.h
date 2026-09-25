@@ -44,8 +44,16 @@ public:
   // immediately.
   void showBattery(uint8_t percent);
 
-  // Call from loop(): restores the scoreboard once a
-  // temporary screen has expired. Returns immediately otherwise.
+  // Blinks the scores on and off while the remote is missing.
+  // tick() drives the animation; turning it off puts the scores
+  // straight back on the panel.
+  void setBlinking(bool blinking);
+
+  bool isBlinking() const { return blinkActive; }
+
+  // Call from loop(): advances the blink, or restores the
+  // scoreboard once a temporary screen has expired. Returns
+  // immediately otherwise.
   void tick();
 
   // Scores -> framebuffer only (no encoding, no BLE).
@@ -64,6 +72,13 @@ private:
   // Framebuffer -> PNG -> packet -> LED. Shared by every
   // screen; the caller has already drawn the framebuffer.
   bool sendFrame();
+
+  // Pushes an empty frame: the dark half of a blink.
+  bool sendBlank();
+
+  // Sends the next blink frame if the current one has been up
+  // long enough.
+  void tickBlink();
 
 
   LedDisplay& display;
@@ -88,4 +103,12 @@ private:
   bool temporaryScreen = false;
 
   unsigned long temporaryScreenEnd = 0;
+
+  // Blink state: while active the panel alternates between the
+  // scores and an empty frame.
+  bool blinkActive = false;
+
+  bool blinkVisible = false;
+
+  unsigned long blinkToggleTime = 0;
 };

@@ -34,6 +34,11 @@ namespace Config {
   // alternates between a D18 scan and an LED scan.
   static const uint32_t BLE_SCAN_SECONDS = 5;
 
+  // Scan length used while the panel is blinking for a missing
+  // remote. A scan blocks the loop, so slice it up: the blink
+  // can only be advanced between scans.
+  static const uint32_t BLE_SCAN_SECONDS_SHORT = 1;
+
 
   // ---- Display geometry -------------------------------------
 

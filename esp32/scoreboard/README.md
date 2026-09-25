@@ -130,6 +130,20 @@ board never needs a reset:
 Scores are never lost by a disconnect; button presses that arrive while the
 LED is being reconnected are queued and applied once the loop resumes.
 
+### Blinking while the remote is missing
+
+Whenever the panel is connected but the D18 is not — at startup and after the
+remote drops — the scores blink on and off so it is obvious from across the
+room that the board is not taking button presses yet. `Scoreboard::tick()`
+alternates the score frame with an empty one (`BLINK_MS`, top of
+`Scoreboard.cpp`), and `Scoreboard::setBlinking(false)` puts the scores back
+the moment the remote is connected.
+
+A BLE scan blocks the loop, so while the panel is blinking the D18 is scanned
+for in short slices (`Config::BLE_SCAN_SECONDS_SHORT`, 1 s) instead of the
+usual 5 s; the blink can only advance between scans, so that slice, not
+`BLINK_MS`, sets the visible rate.
+
 ## Module layout
 
 The sketch is split into one class per file:
@@ -146,7 +160,7 @@ The sketch is split into one class per file:
 | `D18Remote.h/.cpp` | BLE HID client for the D18: scan, connect, secure, subscribe to input reports, decode touchpad gestures and consumer keys into button numbers |
 | `RemoteBattery.h/.cpp` | Reads the D18 charge level over the standard BLE Battery Service (`0x180F` / `0x2A19`) on the existing D18 link |
 | `BatteryScreen.h/.cpp` | Draws a battery percentage (digits + `%`) centered on a `Framebuffer`, green / yellow / red by charge; sets how long it stays up (`SHOW_MS`) |
-| `Scoreboard.h/.cpp` | Owns the two scores and the display pipeline; maps button numbers to score changes; hosts temporary screens (battery) and restores the scores when they expire |
+| `Scoreboard.h/.cpp` | Owns the two scores and the display pipeline; maps button numbers to score changes; hosts temporary screens (battery) and restores the scores when they expire; blinks the scores while the remote is missing |
 
 ### Display pipeline
 

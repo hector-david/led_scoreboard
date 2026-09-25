@@ -76,17 +76,22 @@ Serial monitor runs at **115200** baud.
 
 ## Startup sequence
 
-Connection order matters. The D18 only advertises for a short window after a
-button press, so it is connected first; the LED panel is scanned for while the
-D18 link stays up.
+The LED panel is connected first: it is what the board exists to drive, and it
+has to be up before a missing remote can be signalled by blinking the scores.
+The D18 is only scanned for once the panel is connected.
 
 1. Open the serial monitor, then reset the board.
-2. When you see `Scanning for D18...`, press a button on the remote to make it
-   advertise. The board connects and secures the link (Just Works pairing).
-3. The board subscribes to the D18 HID input reports.
-4. The board scans for `LED_BLE_CD9B89CA` and connects (MTU 517 requested).
+2. The board scans for `LED_BLE_CD9B89CA` and connects (MTU 517 requested).
    The panel must be powered on and **not** connected to the iPixel phone app.
-5. Brightness is explicitly set to 50 % and the initial `00 – 00` frame is sent.
+3. Brightness is explicitly set to 50 % and the initial `00 – 00` frame is sent.
+4. The scores start blinking — the panel is up, the remote is not.
+5. Press a button on the remote so it advertises. The board connects, secures
+   the link (Just Works pairing) and subscribes to the HID input reports.
+6. The blink stops and the scores go back to displaying normally.
+
+The panel advertises continuously, so step 2 succeeds as soon as it is powered
+and free. The D18 only advertises for a short window after a button press,
+which is why it gets a fresh scan every round for as long as it is missing.
 
 On success you will see:
 
@@ -113,9 +118,10 @@ STATUS | D18: CONNECTED | LED: CONNECTED | T1: 3 | T2: 1
 ## Automatic reconnection
 
 Both links are checked on every pass of `loop()`. If either one is down the
-board scans for it (`Config::BLE_SCAN_SECONDS`, 5 s per attempt) and tries to
-connect; a failed attempt simply retries on the next pass, forever, so the
-board never needs a reset:
+board scans for it and tries to connect — the panel first (5 s per attempt,
+`Config::BLE_SCAN_SECONDS`), then the D18 in 1 s slices so the blink keeps
+moving; a failed attempt simply retries on the next pass, forever, so the board
+never needs a reset:
 
 - **D18 drops** — the board prints `D18 DISCONNECTED. Press a button on the
   remote to reconnect.` and keeps scanning. Press any button on the remote so
@@ -123,9 +129,11 @@ board never needs a reset:
   reports are re-subscribed.
 - **LED drops** — the board prints `LED DISCONNECTED. Reconnecting...` and
   keeps scanning. As soon as the panel is back it re-sends the brightness and
-  the current scores, which are kept in RAM the whole time.
-- **Both down** — each round scans for the D18 first (it only advertises
-  briefly after a button press), then for the LED.
+  the current scores, which are kept in RAM the whole time. The blink stops
+  while the panel is gone; there is nothing to blink on.
+- **Both down** — the panel is scanned for first, and a round that cannot reach
+  it does not scan for the D18 at all: without a display there is nothing to
+  show and nothing to blink, so the next round goes back to the panel.
 
 Scores are never lost by a disconnect; button presses that arrive while the
 LED is being reconnected are queued and applied once the loop resumes.
@@ -269,3 +277,15 @@ Layout (digit positions, colors, gap) is at the top of `Scoreboard.cpp`.
   (check the `LED MTU negotiation` line) or the PNG is unusually large.
 - **Frame sent, `LED ACK` received, but nothing changes** — try a different
   buffer number in `LedImagePacket.cpp`.
+- **Stuck on `Securing D18 connection...`** — `BLEClient::secureConnection()`
+  waits for an encryption event with no timeout, so anything that stops the
+  pairing from finishing freezes the loop (and the blink) until the remote
+  disconnects. `BLESecurity` tracks "security started" in a single global flag
+  that is only cleared when a link drops, so an LED connect used to be able to
+  claim it, after which the D18's pairing request was never sent and the wait
+  could never end. The sketch now calls
+  `BLESecurity::setForceAuthentication(false)` in `setup()` (only the D18 link
+  ever pairs, and only when `D18Remote::connect()` asks) and
+  `BLESecurity::resetSecurity()` right before securing. If it still hangs,
+  power-cycle the remote: the disconnect releases the wait and the next attempt
+  pairs normally.

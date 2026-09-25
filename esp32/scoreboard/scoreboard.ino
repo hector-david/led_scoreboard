@@ -41,7 +41,8 @@
 //
 // Automatic reconnection:
 //   Both links are checked every loop. Whichever one is down
-//   gets a fresh scan + connect attempt, and failed attempts
+//   gets a fresh scan + connect attempt - the LED panel first,
+//   the D18 only once the panel is up - and failed attempts
 //   simply retry on the next pass, forever. The scores live
 //   in RAM, so after the LED comes back they are re-sent.
 //
@@ -150,6 +151,12 @@ void printReadyBanner() {
 // ============================================================
 // CONNECTION MANAGEMENT
 //
+// The LED panel is always brought up first. It is what makes
+// the board useful, and it has to be there before the missing
+// remote can be signalled by blinking the scores, so a round
+// that cannot reach the panel does not go looking for the D18
+// at all.
+//
 // Each attempt blocks for one scan (Config::BLE_SCAN_SECONDS)
 // plus the connect itself. That is acceptable: a device that
 // is down cannot send us anything, and D18 reports that
@@ -255,27 +262,40 @@ void maintainConnections() {
   }
 
 
-  // D18 first: it only advertises for a short time after a
-  // button press, so give it the first scan of every round.
-  if (!d18Up) {
-    d18Up = connectRemote();
-    d18WasConnected = d18Up;
-  }
-
-  // The LED advertises continuously, so this succeeds as soon
-  // as the panel is powered and not held by the phone app.
+  // The panel comes first. It advertises continuously, so this
+  // succeeds as soon as it is powered and not held by the phone
+  // app, and until it is up there is nowhere to show anything -
+  // not even the blink that asks for a button press.
   if (!ledUp) {
     ledUp = connectDisplay();
     ledWasConnected = ledUp;
   }
 
+  // Still no panel: spend the next round on it again instead of
+  // pairing a remote we could not display anything for.
+  if (!ledUp) {
+    nextAttemptTime = millis() + RETRY_DELAY_MS;
+    return;
+  }
 
-  // Stop the blink the moment the remote answers, and start it
-  // if this round is the one that brought the panel back.
-  scoreboard.setBlinking(ledUp && !d18Up);
+
+  // Blink from here on, so the panel is already asking for a
+  // button press while the D18 scan below is running.
+  scoreboard.setBlinking(!d18Up);
+
+  if (!d18Up) {
+    d18Up = connectRemote();
+    d18WasConnected = d18Up;
+  }
+
+  // Stop the blink the moment the remote answers. Re-check the
+  // panel: it may have dropped during the scan above.
+  scoreboard.setBlinking(ledDisplay.isConnected() && !d18Up);
 
 
-  if (d18Up && ledUp) {
+  // The banner claims both links, so make sure the panel really
+  // survived the scan.
+  if (d18Up && ledDisplay.isConnected()) {
     printReadyBanner();
   }
   else {
@@ -318,6 +338,14 @@ void setup() {
 
   BLESecurity::setAuthenticationMode(true, false, false);
 
+  // Do not let the library start pairing by itself on every
+  // connect. The LED panel needs no pairing, and because the
+  // "security started" flag is global, an LED connect would
+  // claim it and leave D18Remote::connect() waiting forever on a
+  // pairing request that was never sent. Pairing is started
+  // explicitly, on the D18 link only.
+  BLESecurity::setForceAuthentication(false);
+
 
   Serial.printf(
     "INITIAL SCORE | Team 1: %u | Team 2: %u\n",
@@ -325,8 +353,10 @@ void setup() {
     scoreboard.getTeam2Score()
   );
 
-  // Connections are made (and remade) from loop().
-  Serial.println("Press a button on the D18 so the board can find it.");
+  // Connections are made (and remade) from loop(): the LED
+  // panel first, then the D18.
+  Serial.println("Connecting to the LED panel first.");
+  Serial.println("Once the scores start blinking, press a button on the D18 so the board can find it.");
 }
 
 

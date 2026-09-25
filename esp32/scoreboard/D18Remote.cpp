@@ -2,6 +2,7 @@
 
 #include <BLERemoteService.h>
 #include <BLERemoteDescriptor.h>
+#include <BLESecurity.h>
 
 #include "Config.h"
 
@@ -169,6 +170,15 @@ bool D18Remote::connect(uint32_t scanSeconds) {
 
 
   Serial.println("Securing D18 connection...");
+
+  // BLESecurity keeps ONE global "security started" flag for the
+  // whole stack, and it is only cleared when some link drops. If
+  // it is still set from an earlier link (the LED panel sets it
+  // too), startSecurity() returns "already started" without
+  // sending a pairing request, and secureConnection() then waits
+  // forever for an encryption event that can never arrive.
+  // Clearing it here guarantees this link really asks to pair.
+  BLESecurity::resetSecurity();
 
   if (!client->secureConnection()) {
     Serial.println("ERROR: D18 security failed.");

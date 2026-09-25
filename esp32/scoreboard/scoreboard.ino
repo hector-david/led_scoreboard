@@ -29,7 +29,7 @@
 //
 // Goal:
 //   - Stay connected to D18 HID remote
-//   - Stay connected to LED_BLE_CD9B89CA
+//   - Stay connected to LED_BLE_E1D5E5B2
 //   - button_1 -> Team 1 +1
 //   - button_5 -> Team 1 -1
 //   - button_4 -> Team 2 +1

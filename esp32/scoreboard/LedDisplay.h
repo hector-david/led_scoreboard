@@ -11,7 +11,7 @@
 // ============================================================
 // LED DISPLAY
 //
-// BLE client for the LED_BLE_CD9B89CA panel. Owns the GATT
+// BLE client for the LED_BLE_E1D5E5B2 panel. Owns the GATT
 // connection, the write/notify characteristics, and the
 // brightness state.
 // ============================================================

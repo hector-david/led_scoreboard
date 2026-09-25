@@ -23,7 +23,7 @@ This is the ESP32 port of the Python scoreboard in the repo root
 
 - ESP32-S3 N16R8 dev board (16 MB flash, 8 MB OPI PSRAM)
 - D18 BLE HID remote (touchpad + consumer-control buttons)
-- iPixel 32×16 BLE LED panel advertising as `LED_BLE_CD9B89CA`
+- iPixel 32×16 BLE LED panel advertising as `LED_BLE_E1D5E5B2`
 
 ## Controls
 
@@ -81,7 +81,7 @@ has to be up before a missing remote can be signalled by blinking the scores.
 The D18 is only scanned for once the panel is connected.
 
 1. Open the serial monitor, then reset the board.
-2. The board scans for `LED_BLE_CD9B89CA` and connects (MTU 517 requested).
+2. The board scans for `LED_BLE_E1D5E5B2` and connects (MTU 517 requested).
    The panel must be powered on and **not** connected to the iPixel phone app.
 3. Brightness is explicitly set to 50 % and the initial `00 – 00` frame is sent.
 4. The scores start blinking — the panel is up, the remote is not.
@@ -265,7 +265,7 @@ expose the Battery Service the read is logged and the scores stay on the panel.
 
 | Name | Default | Meaning |
 | --- | --- | --- |
-| `LED_NAME` | `LED_BLE_CD9B89CA` | Panel advertised name |
+| `LED_NAME` | `LED_BLE_E1D5E5B2` | Panel advertised name |
 | `D18_NAME` | `D18` | Remote advertised name |
 | `BLE_SCAN_SECONDS` | `5` | Length of one scan attempt (a blocking LED scan, or one slice of the restarted background D18 scan) |
 | `BRIGHTNESS_DEFAULT` | `50` | Brightness sent at startup (%) |

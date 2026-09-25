@@ -14,7 +14,7 @@ namespace Config {
 
   // ---- LED screen -------------------------------------------
 
-  static const char* LED_NAME = "LED_BLE_CD9B89CA";
+  static const char* LED_NAME = "LED_BLE_E1D5E5B2";
 
   static const int BRIGHTNESS_DEFAULT = 50;
   static const int BRIGHTNESS_STEP = 10;

@@ -30,12 +30,18 @@ static const unsigned long RESET_DOUBLE_PRESS_MS = 800;
 // loop blocks for anywhere near this - the remote is scanned
 // for in the background - so the rhythm stays even.
 //
-// Do not shorten this much without watching the panel. It
-// drops image writes that crowd the one before them, ACKing
-// on FA03 with a status of 00 instead of 03, or not at all.
-// A dropped frame here only costs one half of one flash: the
-// next toggle is already on its way.
+// Each frame waits for the panel's ACK before the next goes
+// out (LedDisplay::sendImagePacket), so a shorter flash cannot
+// crowd the panel; it just spends more of its time waiting on
+// the radio. A frame that still fails only costs one half of
+// one flash: the next toggle is already on its way.
 static const unsigned long FLASH_MS = 300;
+
+// A frame the panel refuses is sent once more, encoded at this
+// zlib level instead of PngImage::DEFAULT_LEVEL: same pixels,
+// but never the same bytes (or CRC) as the packet it turned
+// down.
+static const uint8_t RETRY_PNG_LEVEL = 9;
 
 
 Scoreboard::Scoreboard(LedDisplay& display)
@@ -183,25 +189,59 @@ bool Scoreboard::sendBlank(bool quiet) {
 
 bool Scoreboard::sendFrame(bool quiet) {
 
+  LedDisplay::ImageResult result = encodeAndSend(PngImage::DEFAULT_LEVEL, quiet);
+
+  if (result == LedDisplay::ImageResult::REFUSED) {
+    Serial.println("Re-sending the refused frame, re-encoded...");
+    result = encodeAndSend(RETRY_PNG_LEVEL, quiet);
+  }
+
+  switch (result) {
+
+    case LedDisplay::ImageResult::ACCEPTED:
+      return true;
+
+    // Written, just not confirmed. The panel may well be
+    // showing it, so carry on as the send used to: callers
+    // that put up a temporary screen still schedule the
+    // scores' return.
+    case LedDisplay::ImageResult::NO_ACK:
+      return true;
+
+    case LedDisplay::ImageResult::REFUSED:
+      Serial.println("Frame send failed: panel refused it twice");
+      return false;
+
+    default:
+      // encodeAndSend() or the LED module already said why.
+      return false;
+  }
+}
+
+
+LedDisplay::ImageResult Scoreboard::encodeAndSend(uint8_t pngLevel, bool quiet) {
+
   // Framebuffer -> PNG
-  if (!png.encode(framebuffer)) {
+  if (!png.encode(framebuffer, pngLevel)) {
     Serial.println("Frame send failed: PNG");
-    return false;
+    return LedDisplay::ImageResult::NOT_SENT;
   }
 
   // PNG -> LED 0x0002 packet
   if (!packet.build(png.data(), png.size(), quiet)) {
     Serial.println("Frame send failed: packet");
-    return false;
+    return LedDisplay::ImageResult::NOT_SENT;
   }
 
   // Packet -> physical LED
-  if (!display.sendImagePacket(packet.data(), packet.size(), quiet)) {
+  LedDisplay::ImageResult result =
+    display.sendImagePacket(packet.data(), packet.size(), quiet);
+
+  if (result == LedDisplay::ImageResult::NOT_SENT) {
     Serial.println("Frame send failed: BLE send");
-    return false;
   }
 
-  return true;
+  return result;
 }
 
 

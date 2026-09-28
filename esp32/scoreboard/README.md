@@ -70,7 +70,8 @@ Open `scoreboard.ino` in the Arduino IDE with the ESP32 core installed.
 **Libraries:**
 
 - ESP32 Arduino core BLE (`BLEDevice.h`, bundled with the core)
-- [PNGenc](https://github.com/bitbank2/PNGenc) by Larry Bank (Library Manager)
+- [PNGenc](https://github.com/bitbank2/PNGenc) by Larry Bank (Library Manager) -
+  only for the zlib it bundles; `PngImage` writes the PNG itself
 
 Serial monitor runs at **115200** baud.
 
@@ -160,17 +161,16 @@ for in the background. A blocking scan froze the flash for its whole length,
 which is what an uneven, second-long blink was.
 
 **The panel sets the floor on the flash rate.** It drops an image write that
-arrives too soon after the one before it, ACKing on FA03 with a status of `00`
-instead of `03`, or not at all. 300 ms is comfortable; a 90 ms flash made it
-drop roughly every second frame, and because the drops landed on the lit half
-the panel sat black. If you shorten `FLASH_MS`, watch the ACK statuses on the
-serial monitor. A dropped frame now costs only one half of one flash — the
-next toggle is already on its way — instead of leaving the panel dark.
+arrives too soon after the one before it, so every frame waits for the panel's
+ACK before the next one goes out (see [Display pipeline](#display-pipeline)).
+A shorter `FLASH_MS` therefore cannot crowd the panel; it only spends more of
+each half waiting on the radio. A frame that still fails costs one half of one
+flash — the next toggle is already on its way.
 
 Flash frames are built and sent with logging suppressed (the `quiet` argument
 on `LedImagePacket::build()` and `LedDisplay::sendImagePacket()`) - otherwise
-the packet dumps bury the rest of the log. Errors still log, and a failed
-write also ends the burst so the loop can go reconnect the panel.
+the packet dumps bury the rest of the log. Errors, refused frames and missing
+ACKs still log.
 
 ## Module layout
 
@@ -182,9 +182,9 @@ The sketch is split into one class per file:
 | `Config.h` | Shared constants: device names, panel geometry, brightness range, buffer sizes |
 | `Font.h/.cpp` | 7×14 bitmap glyphs for digits `0`–`9` and `%` |
 | `Framebuffer.h/.cpp` | 32×16 RGB888 pixel buffer with `clear`, `fill`, `setPixel`, `drawDigit`, and a serial dump |
-| `PngImage.h/.cpp` | Encodes a `Framebuffer` to an in-RAM PNG with PNGenc |
-| `LedImagePacket.h/.cpp` | Wraps a PNG in the panel's proprietary `0x0002` "show image" packet (length, CRC32, buffer number) |
-| `LedDisplay.h/.cpp` | BLE client for the LED panel: scan, connect, MTU, brightness, single-write image send, ACK notifications |
+| `PngImage.h/.cpp` | Encodes a `Framebuffer` to an in-RAM PNG: adaptive row filters, compressed with PNGenc's bundled zlib in a single pass |
+| `LedImagePacket.h/.cpp` | Wraps a PNG in the panel's proprietary `0x0002` "show image" packet (length, CRC32, slot) |
+| `LedDisplay.h/.cpp` | BLE client for the LED panel: scan, connect, MTU, brightness, single-write image send that waits for the panel's ACK |
 | `D18Remote.h/.cpp` | BLE HID client for the D18: scan, connect, secure, subscribe to input reports, decode touchpad gestures and consumer keys into button numbers |
 | `RemoteBattery.h/.cpp` | Reads the D18 charge level over the standard BLE Battery Service (`0x180F` / `0x2A19`) on the existing D18 link |
 | `BatteryScreen.h/.cpp` | Draws a battery percentage (digits + `%`) centered on a `Framebuffer`, green / yellow / red by charge; sets how long it stays up (`SHOW_MS`) |
@@ -202,6 +202,33 @@ instantly. `LedDisplay::sendImagePacket()` refuses any packet larger than the
 MTU payload rather than letting the BLE stack split it into a prepared/long
 write, which the panel does not accept.
 
+After the write, `sendImagePacket()` waits up to 500 ms for the panel's answer
+on FA03, `05 00 02 00 <status>`:
+
+| Status | Log line | What happens |
+| --- | --- | --- |
+| `03` | `LED image ACK: status 03 \| frame accepted` | Done. This confirms the transfer, not the picture: a PNG the panel cannot decode is ACKed `03` too. |
+| anything else (`00`) | `LED image ACK: status 00 \| frame REFUSED` | The panel kept the old frame. `Scoreboard::sendFrame()` re-sends it once, encoded at zlib level 9 instead of 6: same pixels, but different bytes and a different CRC. |
+| none | `LED image ACK: none within 500 ms` | Treated as sent, as before the ACK wait existed. |
+
+Frames go to **slot 0**, "show now, do not store". Slots 1–100 are storage:
+the panel also saves every frame sent there to its flash, which a scoreboard
+that repaints on every score change (and several times a second while the
+remote is missing) has no use for.
+
+### PNG encoding
+
+`PngImage` writes the PNG (signature, `IHDR`, one `IDAT`, `IEND`) itself and
+compresses the rows with the zlib that ships inside PNGenc, rather than
+calling `PNGENC::addLine()`. PNGenc ends every stream with `Z_FULL_FLUSH`
+before `Z_FINISH`, leaving an empty stored block and a second, empty final
+block after the pixels. The panel ACKed the `00 – 00` frame encoded that way
+with `03` and never drew it; every other score showed. Pillow, which the
+Python version uses, feeds the rows with `Z_NO_FLUSH` and ends with a single
+`Z_FINISH`, so the pixel data is the stream's final block - and that is what
+`PngImage` now does. Row filters make the same choices PNGenc did (all five
+tried, smallest sum of absolute signed bytes wins), zlib level 6, 4 KB window.
+
 ### Image packet format
 
 | Bytes | Field |
@@ -212,7 +239,7 @@ write, which the panel does not accept.
 | 5–8 | PNG byte length, LE32 |
 | 9–12 | CRC32 of the PNG bytes, LE32 |
 | 13 | `0x00` |
-| 14 | Buffer number |
+| 14 | Slot: `0` = show now, do not store (what the scoreboard sends); `1`–`100` = storage slots |
 | 15… | PNG data |
 
 Brightness uses a separate 5-byte command: `05 00 04 80 XX`, where `XX` is the
@@ -282,8 +309,10 @@ Layout (digit positions, colors, gap) is at the top of `Scoreboard.cpp`.
   which breaks NimBLE's `ble_sm.h` (it has a struct field named `local`).
   Always include the BLE headers before `PngImage.h`; `PngImage.h` also
   `#undef`s `local` after including PNGenc.
-- `Scoreboard`, `PngImage`, and `LedImagePacket` hold roughly 10 KB of buffers
-  and PNGenc state. Keep them global, not on the stack.
+- `Scoreboard`, `PngImage`, and `LedImagePacket` hold roughly 10 KB of
+  buffers. Keep them global, not on the stack. zlib's working memory (~38 KB)
+  is a static pool in `PngImage.cpp`, sized to exactly what `deflateInit2()`
+  asks for; PNGenc's zlib has `malloc` disabled.
 - `Scoreboard::testSolidRedFrame()` fills the panel solid red; useful for
   checking the send path independently of the font and layout.
 
@@ -295,8 +324,13 @@ Layout (digit positions, colors, gap) is at the top of `Scoreboard.cpp`.
   connected to the phone app. Close the app; the board keeps scanning.
 - **`SEND ERROR: packet exceeds negotiated MTU.`** — MTU negotiation failed
   (check the `LED MTU negotiation` line) or the PNG is unusually large.
-- **Frame sent, `LED ACK` received, but nothing changes** — try a different
-  buffer number in `LedImagePacket.cpp`.
+- **`frame accepted` (status `03`), but the panel keeps the old picture** —
+  the transfer worked and the panel could not decode that PNG. Note the score
+  and its `LED packet built` line (PNG size and CRC32); see
+  [PNG encoding](#png-encoding).
+- **`frame REFUSED` on both attempts** (`Frame send failed: panel refused it
+  twice`) — the panel turned the frame down even with different bytes. Note
+  which score it was; it is a content problem, not a timing one.
 - **Stuck on `Securing D18 connection...`** — `BLEClient::secureConnection()`
   waits for an encryption event with no timeout, so anything that stops the
   pairing from finishing freezes the loop (and the flash) until the remote

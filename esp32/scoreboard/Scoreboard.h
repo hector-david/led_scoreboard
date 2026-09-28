@@ -72,7 +72,13 @@ private:
   // Framebuffer -> PNG -> packet -> LED. Shared by every
   // screen; the caller has already drawn the framebuffer.
   // quiet suppresses the per-frame logging, for the flash.
+  // A frame the panel refuses is re-sent once, re-encoded.
+  // Returns false if the frame never reached the panel or the
+  // panel refused both attempts.
   bool sendFrame(bool quiet = false);
+
+  // One attempt of sendFrame() at the given zlib level.
+  LedDisplay::ImageResult encodeAndSend(uint8_t pngLevel, bool quiet);
 
   // Pushes an empty frame: the dark half of a flash.
   bool sendBlank(bool quiet = false);

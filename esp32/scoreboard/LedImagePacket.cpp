@@ -3,7 +3,16 @@
 using Config::LED_HEADER_SIZE;
 
 // Which of the panel's image slots to write into.
-static const uint8_t BUFFER_NUMBER = 1;
+//
+// 0 is "show now, do not store". 1-100 are storage slots: the
+// panel also saves every frame sent to one in its flash, and
+// runs it through its slot bookkeeping first. The scoreboard is
+// a live display - it repaints on every score change and several
+// times a second while the remote is missing - so nothing it
+// sends needs to outlive a power cycle, and storing each frame
+// would wear the panel's flash for no benefit. LED_BLE_E1D5E5B2
+// draws slot 0 frames straight away.
+static const uint8_t BUFFER_NUMBER = 0;
 
 
 bool LedImagePacket::build(const uint8_t* png, size_t pngSize, bool quiet) {

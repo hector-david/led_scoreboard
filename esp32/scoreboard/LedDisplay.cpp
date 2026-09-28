@@ -15,6 +15,33 @@ static BLEUUID LED_NOTIFY_UUID("0000fa03-0000-1000-8000-00805f9b34fb");
 
 
 // ============================================================
+// IMAGE ACKNOWLEDGEMENTS
+//
+// The panel answers every image packet on FA03 with
+//
+//   05 00 02 00 <status>
+//
+// 03 means it took the transfer - not that the picture decoded:
+// a PNG the panel cannot draw is ACKed 03 all the same. Anything
+// else (00 in practice) means it turned the frame down and kept
+// showing the old one.
+//
+// notifyCallback() runs on the BLE host task and only records
+// the answer; sendImagePacket() waits for it on the loop task.
+// ============================================================
+
+static const uint8_t IMAGE_ACK_ACCEPTED = 0x03;
+
+// Only bounds the wait when no answer comes at all; an answered
+// frame returns as soon as its ACK arrives.
+static const unsigned long IMAGE_ACK_TIMEOUT_MS = 500;
+
+static volatile bool imageAckReceived = false;
+
+static volatile uint8_t imageAckStatus = 0;
+
+
+// ============================================================
 // CONNECT
 //
 // Normally runs while the D18 remains connected. The scan
@@ -207,11 +234,11 @@ void LedDisplay::decreaseBrightness() {
 // IMAGE PACKET
 // ============================================================
 
-bool LedDisplay::sendImagePacket(const uint8_t* packet, size_t length, bool quiet) {
+LedDisplay::ImageResult LedDisplay::sendImagePacket(const uint8_t* packet, size_t length, bool quiet) {
 
   if (!isConnected() || !writeChar) {
     Serial.println("SEND ERROR: LED is not connected.");
-    return false;
+    return ImageResult::NOT_SENT;
   }
 
   uint16_t mtu = client->getMTU();
@@ -231,8 +258,12 @@ bool LedDisplay::sendImagePacket(const uint8_t* packet, size_t length, bool quie
   // this proprietary packet into a prepared/long write.
   if (length > maxWritePayload) {
     Serial.println("SEND ERROR: packet exceeds negotiated MTU.");
-    return false;
+    return ImageResult::NOT_SENT;
   }
+
+  // Cleared before the write, not after: the ACK can arrive
+  // before writeValue() returns.
+  imageAckReceived = false;
 
   // writeValue takes a non-const pointer but does not modify the data.
   bool ok = writeChar->writeValue(
@@ -245,14 +276,59 @@ bool LedDisplay::sendImagePacket(const uint8_t* packet, size_t length, bool quie
     Serial.printf("LED image write: %s\n", ok ? "OK" : "FAILED");
   }
 
-  return ok;
+  if (!ok) {
+    return ImageResult::NOT_SENT;
+  }
+
+  return waitForImageAck(quiet);
+}
+
+
+// Waiting here is also what keeps frames from crowding each
+// other. The panel drops an image write that arrives too soon
+// after the one before it, so the next frame never goes out
+// until this one has been answered.
+LedDisplay::ImageResult LedDisplay::waitForImageAck(bool quiet) {
+
+  unsigned long start = millis();
+
+  while (!imageAckReceived) {
+
+    if (!isConnected()) {
+      Serial.println("LED image ACK: link dropped while waiting");
+      return ImageResult::NO_ACK;
+    }
+
+    if (millis() - start >= IMAGE_ACK_TIMEOUT_MS) {
+      Serial.printf("LED image ACK: none within %lu ms\n", IMAGE_ACK_TIMEOUT_MS);
+      return ImageResult::NO_ACK;
+    }
+
+    // Lets the BLE host task deliver the notification.
+    delay(1);
+  }
+
+  uint8_t status = imageAckStatus;
+
+  if (status != IMAGE_ACK_ACCEPTED) {
+    Serial.printf("LED image ACK: status %02X | frame REFUSED\n", status);
+    return ImageResult::REFUSED;
+  }
+
+  if (!quiet) {
+    Serial.printf("LED image ACK: status %02X | frame accepted\n", status);
+  }
+
+  return ImageResult::ACCEPTED;
 }
 
 
 // ============================================================
 // NOTIFICATION CALLBACK
 //
-// The panel ACKs each command on FA03.
+// The panel ACKs each command on FA03. Image ACKs are handed
+// to the waiting sendImagePacket(), which logs them (or not,
+// for the flash); everything else is logged here.
 // ============================================================
 
 void LedDisplay::notifyCallback(
@@ -261,6 +337,14 @@ void LedDisplay::notifyCallback(
   size_t length,
   bool isNotify
 ) {
+  // Image ACK: 05 00 02 00 <status>. Status first, then the
+  // flag the waiting loop task polls.
+  if (length >= 5 && data[2] == 0x02 && data[3] == 0x00) {
+    imageAckStatus = data[4];
+    imageAckReceived = true;
+    return;
+  }
+
   Serial.print("LED ACK: ");
 
   for (size_t i = 0; i < length; i++) {

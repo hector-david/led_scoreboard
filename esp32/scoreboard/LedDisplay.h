@@ -39,15 +39,27 @@ public:
 
   void decreaseBrightness();
 
+  // What became of an image packet.
+  enum class ImageResult {
+    ACCEPTED,   // the panel ACKed it with status 03
+    REFUSED,    // the panel ACKed it with any other status
+    NO_ACK,     // written, but the panel never answered
+    NOT_SENT    // not connected, too big, or the write failed
+  };
+
   // Writes a fully built 0x0002 image packet in a single
-  // GATT write. Refuses packets larger than the MTU payload.
+  // GATT write, then waits (bounded) for the panel's ACK on
+  // FA03. Refuses packets larger than the MTU payload.
   // quiet drops the per-write logging: the flash that signals
   // a missing remote sends frames several times a second and
-  // would otherwise bury everything else in the log.
-  bool sendImagePacket(const uint8_t* packet, size_t length, bool quiet = false);
+  // would otherwise bury everything else in the log. Errors,
+  // refusals and missing ACKs are logged either way.
+  ImageResult sendImagePacket(const uint8_t* packet, size_t length, bool quiet = false);
 
 
 private:
+
+  ImageResult waitForImageAck(bool quiet);
 
   static void notifyCallback(
     BLERemoteCharacteristic* characteristic,

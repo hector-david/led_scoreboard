@@ -16,7 +16,7 @@
 //   Bytes 5-8   PNG byte length (LE32)
 //   Bytes 9-12  PNG CRC32 (LE32)
 //   Byte  13    0x00
-//   Byte  14    Buffer number
+//   Byte  14    Slot (0 = show now, do not store)
 //   Bytes 15... PNG bytes
 // ============================================================
 
